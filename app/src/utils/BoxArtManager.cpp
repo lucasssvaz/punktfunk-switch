@@ -1,89 +1,102 @@
+// Copyright 2026 Lucas Saavedra Vaz
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 #include "BoxArtManager.hpp"
-#include "Data.hpp"
 #include "Settings.hpp"
-#include "nanovg.h"
-#include <mutex>
 #include <CImg.h>
 #include <filesystem>
+#include <system_error>
 
-std::mutex m_mutex;
+extern "C" {
+unsigned char* stbi_load_from_memory(const unsigned char* buffer, int len, int* x, int* y,
+                                     int* channels_in_file, int desired_channels);
+void stbi_image_free(void* retval_from_stbi_load);
+}
 
 namespace {
-std::string boxart_path(int app_id) {
-    return (std::filesystem::path(Settings::instance().boxart_dir()) /
-            (std::to_string(app_id) + ".png"))
-            .string();
-}
+std::string sanitize(const std::string& value) {
+    std::string out;
+    for (unsigned char ch : value) {
+        if (std::isalnum(ch) || ch == '-' || ch == '_' || ch == '.')
+            out.push_back(static_cast<char>(ch));
+        else {
+            static const char* hex = "0123456789abcdef";
+            out.push_back('%');
+            out.push_back(hex[ch >> 4]);
+            out.push_back(hex[ch & 15]);
+        }
+    }
+    return out;
 }
 
-bool BoxArtManager::has_boxart(int app_id) {
-    if (m_has_boxart.count(app_id)) {
-        return m_has_boxart[app_id];
+std::string host_key(const Host& host) {
+    if (host.paired())
+        return host.fingerprint.substr(0, 16);
+    return sanitize(host.address);
+}
+} // namespace
+
+std::string BoxArtManager::get_texture_path(const Host& host, const std::string& app_id) {
+    return (std::filesystem::path(Settings::instance().boxart_dir()) / host_key(host) /
+            (sanitize(app_id) + ".png"))
+        .string();
+}
+
+bool BoxArtManager::has_boxart(const Host& host, const std::string& app_id) {
+    const std::string path = get_texture_path(host, app_id);
+    std::lock_guard<std::mutex> guard(m_mutex);
+    auto it = m_has_boxart.find(path);
+    if (it != m_has_boxart.end())
+        return it->second;
+
+    std::error_code ec;
+    bool exists = std::filesystem::file_size(path, ec) > 0 && !ec;
+    m_has_boxart[path] = exists;
+    return exists;
+}
+
+bool BoxArtManager::set_data(const Host& host, const std::string& app_id,
+                             const std::vector<uint8_t>& data) {
+    using namespace cimg_library;
+
+    int width = 0, height = 0, channels = 0;
+    unsigned char* rgb =
+        stbi_load_from_memory(data.data(), (int)data.size(), &width, &height, &channels, 3);
+    if (!rgb || width <= 0 || height <= 0) {
+        if (rgb)
+            stbi_image_free(rgb);
+        return false;
     }
 
-    std::string path = boxart_path(app_id);
-    Data data = Data::read_from_file(path);
-    m_has_boxart[app_id] = !data.is_empty();
-
-    return m_has_boxart[app_id];
-}
-
-void BoxArtManager::set_data(Data data, int app_id) {
-    std::lock_guard<std::mutex> guard(m_mutex);
-
-    std::string path = boxart_path(app_id);
-
-    data.write_to_file(path);
-    compress_texture(path);
-
-    m_has_boxart[app_id] = true;
-}
-
-void BoxArtManager::compress_texture(const std::string& path) {
-    using namespace cimg_library;
+    // stb hands back interleaved RGB; CImg stores planes.
+    CImg<unsigned char> pic(width, height, 1, 3);
+    for (int y = 0; y < height; y++)
+        for (int x = 0; x < width; x++)
+            for (int c = 0; c < 3; c++)
+                pic(x, y, 0, c) = rgb[(y * width + x) * 3 + c];
+    stbi_image_free(rgb);
 
     /*
      * target width == 300
      * target height == 400
      * 0.75 == 300 / 400
      */
+    if (float(width) / float(height) < 0.75f)
+        pic.resize(300, int(float(height) * 300.0f / float(width)), 1, 3, 5);
+    else
+        pic.resize(int(float(width) * 400.0f / float(height)), 400, 1, 3, 5);
 
-    CImg<unsigned char> pic(path.c_str());
-    if (float(pic.width()) / float(pic.height()) < 0.75f) {
-        pic = pic.resize(300, int(float(pic.height()) * 300.0f / float(pic.width())), 1, 3);
-    } else {
-        pic = pic.resize(int(float(pic.width()) * 400.0f / float(pic.height())), 400, 1, 3);
-    }
-    pic.save(path.c_str());
-}
+    const std::string path = get_texture_path(host, app_id);
+    std::error_code ec;
+    std::filesystem::create_directories(std::filesystem::path(path).parent_path(), ec);
 
-std::string BoxArtManager::get_texture_path(int app_id) {
-    return boxart_path(app_id);
-}
-
-void BoxArtManager::make_texture_from_boxart(NVGcontext* ctx, int app_id) {
     std::lock_guard<std::mutex> guard(m_mutex);
-
-    std::string path = boxart_path(app_id);
-    Data data = Data::read_from_file(path);
-
-    if (data.is_empty()) {
-        m_has_boxart[app_id] = false;
-        return;
+    try {
+        pic.save_png(path.c_str());
+    } catch (const CImgException&) {
+        m_has_boxart[path] = false;
+        return false;
     }
-
-    int handle = nvgCreateImageMem(ctx, 0, data.bytes(), (int)data.size());
-
-    if (handle > 0) {
-        m_texture_handle[app_id] = handle;
-    } else {
-        m_has_boxart[app_id] = false;
-    }
-}
-
-int BoxArtManager::texture_id(int app_id) {
-    if (m_texture_handle.count(app_id)) {
-        return m_texture_handle[app_id];
-    }
-    return -1;
+    m_has_boxart[path] = true;
+    return true;
 }

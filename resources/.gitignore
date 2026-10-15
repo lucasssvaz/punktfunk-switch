@@ -1,2 +1,5 @@
 User-Regular.ttf
 User-Switch-Icons.ttf
+# Do not commit dumped Horizon fonts (NintendoExt / Morisawa UD Shin Go).
+switch_font.ttf
+switch_icons.ttf

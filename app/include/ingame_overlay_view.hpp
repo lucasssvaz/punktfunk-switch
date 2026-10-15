@@ -3,8 +3,10 @@
 //  Moonlight
 //
 //  Created by Даниил Виноградов on 29.05.2021.
+//  Copyright 2026 Lucas Saavedra Vaz
 //
-
+//  SPDX-License-Identifier: GPL-3.0-or-later
+//
 #pragma once
 
 #include "streaming_view.hpp"
@@ -55,7 +57,7 @@ class OptionsTab : public brls::Box {
     BRLS_BIND(brls::DetailCell, inputOverlayButton, "input_overlay");
     BRLS_BIND(brls::SelectorCell, keyboardType, "keyboard_type");
     BRLS_BIND(brls::SelectorCell, keyboardFingers, "keyboard_fingers");
-    BRLS_BIND(brls::BooleanCell, touchscreenMouseMode, "touchscreen_mouse_mode");
+    BRLS_BIND(brls::SelectorCell, touchMode, "touch_mode");
     BRLS_BIND(brls::DetailCell, guideKeyButtons, "guide_key_buttons");
     BRLS_BIND(brls::SelectorCell, guideBySystemButton, "guide_by_system_button");
     BRLS_BIND(brls::Header, volumeHeader, "volume_header");

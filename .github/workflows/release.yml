@@ -1,3 +1,6 @@
+# Copyright 2026 Lucas Saavedra Vaz
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 name: Draft Release
 
 on:
@@ -14,9 +17,8 @@ concurrency:
 
 jobs:
   build:
-    name: Build all platforms
-    uses: ./.github/workflows/all-builds.yml
-    secrets: inherit
+    name: Build
+    uses: ./.github/workflows/build.yml
 
   release:
     name: Create draft release
@@ -24,60 +26,25 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-
     steps:
-    - name: Download build artifacts
-      uses: actions/download-artifact@v4
-      with:
-        path: artifacts
+      - name: Download Switch build
+        uses: actions/download-artifact@v4
+        with:
+          name: punktfunk-switch
+          path: dist
 
-    - name: Collect release assets
-      shell: bash
-      run: |
-        set -euo pipefail
-
-        mkdir -p dist
-
-        while IFS= read -r -d '' artifact_dir; do
-          artifact_name="$(basename "$artifact_dir")"
-          mapfile -d '' files < <(find "$artifact_dir" -type f -print0)
-
-          if (( ${#files[@]} == 1 )); then
-            filename="$(basename "${files[0]}")"
-            destination="dist/${filename}"
-
-            if [[ -e "$destination" ]]; then
-              destination="dist/${artifact_name}-${filename}"
-            fi
-
-            cp "${files[0]}" "$destination"
-          elif (( ${#files[@]} > 1 )); then
-            (
-              cd "$artifact_dir"
-              zip -9 -r "$GITHUB_WORKSPACE/dist/${artifact_name}.zip" .
-            )
+      - name: Create or update draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          ls -l dist
+          if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
+            gh release edit "$GITHUB_REF_NAME" --draft
+            gh release upload "$GITHUB_REF_NAME" dist/* --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" dist/* \
+              --draft \
+              --title "PFSW $GITHUB_REF_NAME" \
+              --generate-notes
           fi
-        done < <(find artifacts -mindepth 1 -maxdepth 1 -type d -print0)
-
-        if ! find dist -mindepth 1 -maxdepth 1 -type f -print -quit | grep -q .; then
-          echo "No release assets were collected"
-          exit 1
-        fi
-
-        find dist -mindepth 1 -maxdepth 1 -type f -print
-
-    - name: Create or update draft release
-      shell: bash
-      env:
-        GH_TOKEN: ${{ github.token }}
-        GH_REPO: ${{ github.repository }}
-      run: |
-        if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
-          gh release edit "$GITHUB_REF_NAME" --draft
-          gh release upload "$GITHUB_REF_NAME" dist/* --clobber
-        else
-          gh release create "$GITHUB_REF_NAME" dist/* \
-            --draft \
-            --title "$GITHUB_REF_NAME" \
-            --generate-notes
-        fi

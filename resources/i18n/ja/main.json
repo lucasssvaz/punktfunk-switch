@@ -1,27 +1,10 @@
 {
-    "about": {
-        "about": "Moonlight-Switch is a third-party game streaming client based on Moonlight-Common-C for the Nintendo Switch",
-        "link_gbatemp": "GbaTemp Page",
-        "link_github": "GitHub Page",
-        "link_patreon": "Patreon Page",
-        "links": "Links",
-        "thanks": "Special Thanks",
-        "thanks_1": " Rock88 and his Moonlight-NX, lots of code was reused in this app",
-        "thanks_2": " Natinusala for creating Borealis",
-        "thanks_3": " Moonlight team, it could not be possible without them",
-        "thanks_4": " Cameron Gutman for helping to solve an issue with LibNX",
-        "thanks_5": " Everyone involved into app development",
-        "thanks_6": " You, for using my homebrew!",
-        "title": "About",
-        "version": "Moonlight-Switch v{} by XITRIX"
-    },
     "add_host": {
         "connect": "接続",
         "host_ip": "ホストIP",
         "manual": "手動",
         "pair_postfix": " ホストデバイス上",
         "pair_prefix": "ペアリング\n\n入力　",
-        "paired_error": "すでにペアリングされています\n構成が更新されました",
         "search": "検索",
         "search_error": "検索できません",
         "search_refresh": "更新",
@@ -32,10 +15,7 @@
         "run_current": "現在のアプリを実行する",
         "running": "実行中",
         "star": "Star",
-        "terminate": "終了する",
-        "terminate_current_app": "現在のアプリを終了します",
         "terminate_postfix": "\n\n保存されていない進行状況はすべて失われる可能性があります",
-        "terminate_prefix": "終了する ",
         "unstar": "Unstar"
     },
     "common": {
@@ -146,9 +126,7 @@
         "overlay_setup_message": "オーバーレイを開くために使用するキーを押します:\n\n",
         "overlay_time": "押し続けると数秒で開きます",
         "overlay_zero_time": "0 (すぐに)",
-        "paop": "PCでオーディオを再生する",
         "quality": "品質 (Higher settings requires CPU overclock)",
-        "request_hdr": "Request HDR Video",
         "resolution": "解像度",
         "resolution_native": "ネイティブ",
         "resolution_scale": "倍率",
@@ -167,11 +145,27 @@
         "touchscreen_mouse_mode": "Touchscreen mode",
         "use_hw_decoding": "Enable hardware acceleration",
         "use_system_button": "Use system button",
-        "usops": "ストリーミングの最適な再生可能な設定を使用する",
         "video_bitrate": "ビデオビットレート",
         "video_codec": "ビデオコーデック",
+        "codec_auto": "自動",
+        "video_fit": "画面フィット",
+        "video_fit_fit": "フィット（帯）",
+        "video_fit_crop": "クロップ",
+        "video_fit_stretch": "ストレッチ",
+        "touch_mode": "タッチ入力",
+        "touch_mode_trackpad": "トラックパッド",
+        "touch_mode_pointer": "ダイレクトポインタ",
+        "touch_mode_touch": "タッチパススルー",
+        "touch_mode_off": "オフ",
         "volume_amplification": "ボリューム増幅を許可する",
-        "zero_threads": "0 (使用しないスレッド)"
+        "zero_threads": "0 (使用しないスレッド)",
+        "keep_host_audio": "ホストで音声を再生したままにする",
+        "stats_tier": "統計オーバーレイの詳細",
+        "stats_tier_basic": "基本",
+        "stats_tier_standard": "標準",
+        "stats_tier_detailed": "詳細",
+        "gamepad_type": "エミュレートするコントローラー",
+        "send_motion": "モーションを送信（ジャイロ）"
     },
     "streaming": {
         "connection": "接続",
@@ -194,5 +188,5 @@
         "favorites": "Favorites",
         "settings": "設定"
     },
-    "title": "Moonlight"
+    "title": "PFSW"
 }

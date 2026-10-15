@@ -1,19 +1,21 @@
 {
     "about": {
-        "about": "Moonlight-Switch is a third-party game streaming client based on Moonlight-Common-C for the Nintendo Switch",
-        "link_gbatemp": "GbaTemp Page",
-        "link_github": "GitHub Page",
-        "link_patreon": "Patreon Page",
-        "links": "Links",
-        "thanks": "Special Thanks",
-        "thanks_1": " Rock88 and his Moonlight-NX, lots of code was reused in this app",
-        "thanks_2": " Natinusala for creating Borealis",
-        "thanks_3": " Moonlight team, it could not be possible without them",
-        "thanks_4": " Cameron Gutman for helping to solve an issue with LibNX",
-        "thanks_5": " Everyone involved into app development",
-        "thanks_6": " You, for using my homebrew!",
         "title": "About",
-        "version": "Moonlight-Switch v{} by XITRIX"
+        "version": "PFSW v{}",
+        "about": "PFSW (Punktfunk for Switch) is a low-latency game streaming client for punktfunk hosts. It is a fork of Moonlight-Switch with the GameStream protocol replaced by punktfunk's QUIC transport.\n\nCopyright 2026 Lucas Saavedra Vaz",
+        "links": "Links",
+        "link_repo": "PFSW repository",
+        "link_punktfunk": "punktfunk project",
+        "link_github": "Moonlight-Switch (upstream)",
+        "licenses": "Licenses",
+        "licenses_text": "This app is free software under the GNU GPL v3 or later (Moonlight-Switch). Original PFSW code and the punktfunk core as used here are Apache-2.0. Full license texts and third-party notices ship in the release archive (switch/punktfunk/licenses).",
+        "thanks": "Special Thanks",
+        "thanks_1": " XITRIX and the Moonlight-Switch contributors, this app is built on their work",
+        "thanks_2": " Natinusala and contributors for Borealis",
+        "thanks_3": " Rock88 and his Moonlight-NX",
+        "thanks_4": " averne for the NVTegra hardware decoding in FFmpeg",
+        "thanks_5": " The punktfunk contributors",
+        "thanks_6": " You, for using this homebrew!"
     },
     "add_host": {
         "connect": "Connect",
@@ -21,22 +23,31 @@
         "manual": "Manual",
         "pair_postfix": " on your host device",
         "pair_prefix": "Pair up\n\nEnter ",
-        "paired_error": "Already paired\nConfiguration has been updated",
+        "paired_error": "Already paired\nThe saved host has been updated",
         "search": "Search",
         "search_error": "Search is unavailable",
         "search_refresh": "Refresh",
-        "try_connect": "Trying to connect to the host"
+        "try_connect": "Trying to connect to the host",
+        "trust_message": "{} doesn't know this device yet.\n\nPair with the PIN from the host's Pairing page, or ask the host's owner to approve \"{}\".",
+        "pair_pin": "Pair with PIN",
+        "request_access": "Request access",
+        "pairing": "Pairing...",
+        "pin_title": "Host PIN",
+        "pin_hint": "The PIN shown on the host's Pairing page",
+        "waiting_approval": "Waiting for approval\n\nApprove \"{}\" in the host's console or web UI."
     },
     "app_list": {
         "reload_app_list": "Reload",
         "run_current": "Run current app",
         "running": "Running",
         "star": "Star",
-        "terminate": "Terminate",
-        "terminate_current_app": "Terminate current app",
+        "terminate": "End game",
+        "terminate_current_app": "End current game",
         "terminate_postfix": "\n\nAll unsaved progress could be lost",
-        "terminate_prefix": "Terminate ",
-        "unstar": "Unstar"
+        "terminate_prefix": "End ",
+        "unstar": "Unstar",
+        "desktop": "Desktop",
+        "library_error": "Couldn't load the game library"
     },
     "common": {
         "cancel": "Cancel",
@@ -83,7 +94,12 @@
         "wait": "Wait...",
         "wake_up": "Wake up",
         "wake_up_error": "Could not wake up the host",
-        "wake_up_message": "Sending Wake Up"
+        "wake_up_message": "Sending Wake Up",
+        "refresh": "Refresh",
+        "mismatch": "Certificate changed",
+        "mismatch_message": "This host now presents a different certificate than the one this device paired with.\n\nIf the host was reinstalled, pair again. Otherwise something on the network may be impersonating it.",
+        "pair_again": "Pair again",
+        "retry": "Retry"
     },
     "mapping_layout_editor": {
         "remove": "Remove layout",
@@ -146,12 +162,10 @@
         "overlay_setup_message": "Press keys you'd like to use to open Overlay:\n\n",
         "overlay_time": "Hold to open in seconds",
         "overlay_zero_time": "0 (Immediately)",
-        "paop": "Play Audio on PC",
         "quality": "Quality (Higher settings requires CPU overclock)",
-        "request_hdr": "Request HDR Video",
         "resolution": "Resolution",
         "resolution_native": "Native",
-        "resolution_scale": "Scale",
+        "resolution_scale": "Render scale",
         "image_adjustments": "Image Adjustments",
         "dithering": "Dithering",
         "upscaling": "Upscale lower resolutions",
@@ -167,11 +181,27 @@
         "touchscreen_mouse_mode": "Touchscreen mode",
         "use_hw_decoding": "Enable hardware acceleration",
         "use_system_button": "Use system button",
-        "usops": "Use Streaming Optimal Playable Settings",
         "video_bitrate": "Video bitrate",
         "video_codec": "Video codec",
+        "codec_auto": "Auto",
+        "video_fit": "Picture fit",
+        "video_fit_fit": "Fit (letterbox)",
+        "video_fit_crop": "Crop",
+        "video_fit_stretch": "Stretch",
+        "touch_mode": "Touch input",
+        "touch_mode_trackpad": "Trackpad",
+        "touch_mode_pointer": "Direct pointer",
+        "touch_mode_touch": "Touch passthrough",
+        "touch_mode_off": "Off",
         "volume_amplification": "Allow volume amplification",
-        "zero_threads": "0 (No use threads)"
+        "zero_threads": "0 (No use threads)",
+        "keep_host_audio": "Keep audio playing on the host",
+        "stats_tier": "Statistics overlay detail",
+        "stats_tier_basic": "Basic",
+        "stats_tier_standard": "Standard",
+        "stats_tier_detailed": "Detailed",
+        "gamepad_type": "Emulated controller",
+        "send_motion": "Send motion controls (gyro)"
     },
     "streaming": {
         "connection": "Connection",
@@ -194,5 +224,5 @@
         "favorites": "Favorites",
         "settings": "Settings"
     },
-    "title": "Moonlight"
+    "title": "PFSW"
 }

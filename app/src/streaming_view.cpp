@@ -3,8 +3,10 @@
 //  Moonlight
 //
 //  Created by Даниил Виноградов on 27.05.2021.
+//  Copyright 2026 Lucas Saavedra Vaz
 //
-
+//  SPDX-License-Identifier: GPL-3.0-or-later
+//
 #ifdef __SWITCH__
 #include <borealis/platforms/switch/switch_input.hpp>
 #endif
@@ -17,7 +19,7 @@
 #include "ingame_overlay_view.hpp"
 #include "streaming_input_overlay.hpp"
 #include "two_finger_scroll_recognizer.hpp"
-#include <Limelight.h>
+#include "PunktfunkInput.hpp"
 #include <chrono>
 #include <nanovg.h>
 
@@ -28,10 +30,6 @@
 #endif
 
 using namespace brls;
-
-#ifdef PLATFORM_TVOS
-extern void updatePreferredDisplayMode(bool streamActive);
-#endif
 
 void setBottomBarStatus(const char *value) {
 #if defined(__SDL2__) || defined(__SDL3__)
@@ -67,7 +65,7 @@ void overrideButtonsIfNeeded(bool value) {
 #endif
 }
 
-StreamingView::StreamingView(const Host& host, const AppInfo& app) : host(host), app(app) {
+StreamingView::StreamingView(const Host& host, const App& app) : host(host), app(app) {
     Application::getPlatform()->disableScreenDimming(true);
 
     setFocusable(true);
@@ -80,36 +78,21 @@ StreamingView::StreamingView(const Host& host, const AppInfo& app) : host(host),
     keyboardHolder->setAlignItems(AlignItems::STRETCH);
     addView(keyboardHolder);
 
-    session = new MoonlightSession(host.preferred_address(), app.app_id);
-
-#ifdef PLATFORM_TVOS
-        updatePreferredDisplayMode(true);
-#endif
+    session = new PunktfunkSession(host, app);
 
     ASYNC_RETAIN
-    GameStreamClient::instance().connect(
-        host, [ASYNC_TOKEN](GSResult<SERVER_DATA> result) {
-            ASYNC_RELEASE
-            if (!result.isSuccess()) {
-                showError(result.error(), [this]() { terminate(false); });
-                return;
-            }
+    session->start([ASYNC_TOKEN](PFResult<bool> result) {
+        ASYNC_RELEASE
 
-            session->set_address(
-                GameStreamClient::instance().active_address(this->host));
+        loader->setHidden(true);
+        if (!result.isSuccess()) {
+            failed = true;
+            showError(result.error(), [this]() { terminate(false); });
+        }
+    });
 
-            ASYNC_RETAIN
-            session->start([ASYNC_TOKEN](GSResult<bool> result) {
-                ASYNC_RELEASE
-
-                loader->setHidden(true);
-                if (!result.isSuccess()) {
-                    showError(result.error(), [this]() { terminate(false); });
-                }
-            }, result.value().isSunshine());
-        });
-
-    MoonlightInputManager::instance().reloadButtonMappingLayout();
+    StreamInputManager::instance().resetSession();
+    StreamInputManager::instance().reloadButtonMappingLayout();
 
     static bool lMouseKeyGate = false;
     static bool lMouseKeyUsed = false;
@@ -119,11 +102,11 @@ StreamingView::StreamingView(const Host& host, const AppInfo& app) : host(host),
 
     addGestureRecognizer(
         new ClickGestureRecognizer(1, [](TapGestureStatus status) {
-            if (Settings::instance().touchscreen_mouse_mode()) return;
+            if (!Settings::instance().touch_uses_trackpad()) return;
 
             if (status.state == brls::GestureState::END) {
                 Logger::debug("Left mouse click");
-                MoonlightInputManager::leftMouseClick();
+                StreamInputManager::leftMouseClick();
                 lMouseKeyGate = true;
                 delay(200, [] { lMouseKeyGate = false; });
             }
@@ -131,11 +114,11 @@ StreamingView::StreamingView(const Host& host, const AppInfo& app) : host(host),
 
     addGestureRecognizer(
         new ClickGestureRecognizer(2, [](TapGestureStatus status) {
-            if (Settings::instance().touchscreen_mouse_mode()) return;
+            if (!Settings::instance().touch_uses_trackpad()) return;
 
             if (status.state == brls::GestureState::END) {
                 Logger::debug("Right mouse click");
-                MoonlightInputManager::rightMouseClick();
+                StreamInputManager::rightMouseClick();
             }
         }));
 
@@ -157,7 +140,7 @@ StreamingView::StreamingView(const Host& host, const AppInfo& app) : host(host),
                 Application::pushActivity(new Activity(overlay));
             }
 
-            if (Settings::instance().touchscreen_mouse_mode()) return;
+            if (!Settings::instance().touch_uses_trackpad()) return;
 
             if (status.state == brls::GestureState::UNSURE && lMouseKeyGate) {
                 lMouseKeyGate = false;
@@ -165,8 +148,7 @@ StreamingView::StreamingView(const Host& host, const AppInfo& app) : host(host),
             } else if (status.state == brls::GestureState::START) {
                 if (lMouseKeyUsed) {
 //                    Logger::debug("Pressed key at {}", status.state);
-                    LiSendMouseButtonEvent(BUTTON_ACTION_PRESS,
-                                           BUTTON_MOUSE_LEFT);
+                    pf_input::mouse_button(pf_input::MOUSE_LEFT, true);
                 }
             } else if (status.state == brls::GestureState::STAY) {
                 brls::RawMouseState mouseState;
@@ -174,13 +156,12 @@ StreamingView::StreamingView(const Host& host, const AppInfo& app) : host(host),
                 // Dirty hack to not update pan if mouse left button is pressed, because pan gesture recognizer will append its speed with raw mouse value
                 // Need to improve gesture recognizers to determine the input source and ignore it for mouse
                 if (!mouseState.leftButton) {
-                    MoonlightInputManager::instance().updateTouchScreenPanDelta(
+                    StreamInputManager::instance().updateTouchScreenPanDelta(
                             status);
                 }
             } else if (lMouseKeyUsed) {
 //                Logger::debug("Release key at {}", status.state);
-                LiSendMouseButtonEvent(BUTTON_ACTION_RELEASE,
-                                       BUTTON_MOUSE_LEFT);
+                pf_input::mouse_button(pf_input::MOUSE_LEFT, false);
                 lMouseKeyUsed = false;
             }
         },
@@ -188,7 +169,7 @@ StreamingView::StreamingView(const Host& host, const AppInfo& app) : host(host),
 
     scrollTouchRecognizer = new TwoFingerScrollGestureRecognizer(
             [this](TwoFingerScrollState state) {
-                if (Settings::instance().touchscreen_mouse_mode()) return;
+                if (!Settings::instance().touch_uses_trackpad()) return;
 
                 if (state.state == brls::GestureState::START)
                     this->touchScrollCounter = 0;
@@ -198,8 +179,8 @@ StreamingView::StreamingView(const Host& host, const AppInfo& app) : host(host),
                     Logger::debug("Scroll on: {}",
                                   threshold - this->touchScrollCounter);
                     int invert = Settings::instance().swap_mouse_scroll() ? -1 : 1;
-                    char scrollCount = threshold - this->touchScrollCounter;
-                    LiSendScrollEvent(scrollCount * invert);
+                    int scrollCount = threshold - this->touchScrollCounter;
+                    pf_input::scroll(scrollCount * invert * pf_input::WHEEL_DELTA);
                     this->touchScrollCounter = threshold;
                 }
             });
@@ -241,7 +222,7 @@ StreamingView::StreamingView(const Host& host, const AppInfo& app) : host(host),
 void StreamingView::onFocusGained() {
     Box::onFocusGained();
 
-    MoonlightInputManager::instance().setInputEnabled(true);
+    StreamInputManager::instance().setInputEnabled(true);
 
     if (!blocked) {
         blocked = true;
@@ -266,8 +247,8 @@ void StreamingView::onFocusGained() {
 void StreamingView::onFocusLost() {
     Box::onFocusLost();
 
-    MoonlightInputManager::instance().setInputEnabled(false);
-    MoonlightInputManager::instance().dropInput();
+    StreamInputManager::instance().setInputEnabled(false);
+    StreamInputManager::instance().dropInput();
 
     if (blocked) {
         blocked = false;
@@ -287,7 +268,13 @@ void StreamingView::onFocusLost() {
 void StreamingView::draw(NVGcontext* vg, float x, float y, float width,
                          float height, Style style, FrameContext* ctx) {
     if (session->is_terminated()) {
-        terminate(false);
+        // A failed connect already shows its error dialog, which terminates on close.
+        if (!failed) {
+            std::string message = session->end_message();
+            terminate(false);
+            if (!message.empty())
+                brls::Application::notify(message);
+        }
         return;
     }
 
@@ -313,80 +300,8 @@ void StreamingView::draw(NVGcontext* vg, float x, float y, float width,
         nvgText(vg, 50, height - 28, "\uE140 Bad connection...", nullptr);
     }
 
-    if (session->use_hdr() != m_use_hdr) {
-        m_use_hdr = session->use_hdr();
-
-#ifdef PLATFORM_TVOS
-        updatePreferredDisplayMode(true);
-#endif
-    }
-
     if (draw_stats) {
-        auto stats = session->session_stats();
-
-        auto statistics = fmt::format(
-                    "Estimated host PC frame rate: {:.{}f} FPS\n"
-                        "Incoming frame rate from network: {:.{}f} FPS\n"
-                        "Decoding frame rate: {:.{}f} FPS\n"
-                        "Rendering frame rate: {:.{}f} FPS\n",
-                    stats->video_decode_stats.current_host_fps, 2,
-                    stats->video_decode_stats.current_received_fps, 2,
-                    stats->video_decode_stats.current_decoded_fps, 2,
-                    stats->video_render_stats.rendered_fps, 2);
-
-        statistics += fmt::format("Frames dropped by your network connection: {}\n"
-                                  "Average receive time: {:.{}f} | {:.{}f} ms\n"
-                                  "Average decode time: {:.{}f} | {:.{}f} ms\n"
-                                  "Average decoder delay: {:.{}f} | {:.{}f} ms\n"
-                                  "Average rendering time: {:.{}f} ms\n",
-                                  stats->video_decode_stats.network_dropped_frames,
-                                  stats->video_decode_stats.current_receive_time, 2,
-                                  stats->video_decode_stats.session_receive_time, 2,
-                                  stats->video_decode_stats.current_decoding_time, 2,
-                                  stats->video_decode_stats.session_decoding_time, 2,
-                                  stats->video_decode_stats.current_decoder_delay, 2,
-                                  stats->video_decode_stats.session_decoder_delay, 2,
-                                  stats->video_render_stats.rendering_time, 2);
-
-        if (stats->video_render_stats.gpu_timed_frames > 0) {
-            statistics += fmt::format("Average GPU render time: {:.{}f} ms\n",
-                                      stats->video_render_stats.gpu_rendering_time, 2);
-        }
-
-        if (stats->video_render_stats.post_processed_frames > 0) {
-            statistics += fmt::format(
-                "Average post-processing pass time: {:.{}f} ms (D:{:.{}f} | U:{:.{}f} | S:{:.{}f})\n",
-                /* "Post-processed frames: {} / {}\n", */
-                stats->video_render_stats.post_processing_time, 2,
-                stats->video_render_stats.dithering_time, 2,
-                stats->video_render_stats.upscaling_time, 2,
-                stats->video_render_stats.sharpening_time, 2
-                /*stats->video_render_stats.post_processed_frames, */
-                /*stats->video_render_stats.rendered_frames*/);
-        }
-
-        statistics += fmt::format("Frames queue underflows | skipped: {} | {}\n"
-                                  "Queue empty | startup holds: {} | {}\n"
-                                  "Queue overflow | paced skips: {} | {}\n"
-                                  "Scheduled frame holds: {}\n"
-                                  "Frames presented by local clock: {}\n"
-                                  "Playout resyncs | estimated source: {} | {:.2f} FPS\n"
-                                  "Max pushes between draws: {}\n"
-                                  "Frames queue depth | target | capacity: {} | {} | {}",
-                                  AVFrameHolder::instance().getFakeFrameStat(),
-                                  AVFrameHolder::instance().getFrameDropStat(),
-                                  AVFrameHolder::instance().getFrameQueueEmptyStat(),
-                                  AVFrameHolder::instance().getFrameQueueRebufferHoldStat(),
-                                  AVFrameHolder::instance().getFrameQueueOverflowDropStat(),
-                                  AVFrameHolder::instance().getFrameQueuePacingSkipStat(),
-                                  AVFrameHolder::instance().getFrameQueueScheduledHoldStat(),
-                                  AVFrameHolder::instance().getFrameQueueLocalClockPacedFrameStat(),
-                                  AVFrameHolder::instance().getFrameQueuePlayoutResyncStat(),
-                                  AVFrameHolder::instance().getFrameQueueEstimatedSourceFps(),
-                                  AVFrameHolder::instance().getFrameQueueMaxPushBurstStat(),
-                                  AVFrameHolder::instance().getFrameQueueSize(),
-                                  AVFrameHolder::instance().getFrameQueueTargetDepth(),
-                                  AVFrameHolder::instance().getFrameQueueCapacity());
+        std::string statistics = session->stats_text();
 
         nvgFontFaceId(vg, Application::getFont(FONT_REGULAR));
         nvgFontSize(vg, 20);
@@ -442,7 +357,7 @@ void StreamingView::terminate(bool terminateApp) {
 
 void StreamingView::handleInput() {
     if (!this->focused) {
-        MoonlightInputManager::instance().dropInput();
+        StreamInputManager::instance().dropInput();
         return;
     }
 
@@ -453,17 +368,16 @@ void StreamingView::handleInput() {
         for (int i = 0; i < _VK_KEY_MAX; i++) {
             if (keyboardState.keys[i] != oldKeyboardState.keys[i]) {
                 oldKeyboardState.keys[i] = keyboardState.keys[i];
-                LiSendKeyboardEvent(
-                    keyboard->getKeyCode((KeyboardKeys)i),
-                    keyboardState.keys[i] ? KEY_ACTION_DOWN : KEY_ACTION_UP, 0);
+                pf_input::key((uint16_t)keyboard->getKeyCode((KeyboardKeys)i),
+                              keyboardState.keys[i]);
             }
         }
 
         // Drop input if keyboard overlay presented
-//        MoonlightInputManager::instance().dropInput();
+//        StreamInputManager::instance().dropInput();
     }
 //    else {
-    MoonlightInputManager::instance().handleInput(keyboard != nullptr);
+    StreamInputManager::instance().handleInput(keyboard != nullptr);
 //    }
 
     if (!Application::currentTouchState.empty()) {
@@ -585,10 +499,6 @@ void StreamingView::onLayout() {
 }
 
 StreamingView::~StreamingView() {
-#ifdef PLATFORM_TVOS
-    updatePreferredDisplayMode(false);
-#endif
-    
     Application::getPlatform()->disableScreenDimming(false);
     Application::getPlatform()
         ->getInputManager()

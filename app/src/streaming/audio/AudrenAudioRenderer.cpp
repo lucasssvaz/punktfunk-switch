@@ -1,10 +1,11 @@
+// Copyright 2026 Lucas Saavedra Vaz
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 #ifdef __SWITCH__
 
 #include "AudrenAudioRenderer.hpp"
 #include <Settings.hpp>
 #include <borealis.hpp>
-#include <algorithm>
-#include <climits>
 #include <inttypes.h>
 #include <malloc.h>
 #include <stdio.h>
@@ -12,17 +13,6 @@
 #include <string.h>
 
 static const uint8_t m_sink_channels[] = {0, 1};
-
-namespace {
-
-void applyVolume(s16* buffer, size_t sampleCount, int volume) {
-    for (size_t i = 0; i < sampleCount; i++) {
-        const int scaled = (static_cast<int>(buffer[i]) * volume) / 100;
-        buffer[i] = static_cast<s16>(std::min<int>(SHRT_MAX, std::max<int>(SHRT_MIN, scaled)));
-    }
-}
-
-} // namespace
 
 static const AudioRendererConfig m_ar_config = {
     .output_rate = AudioRendererOutputRate_48kHz,
@@ -33,28 +23,18 @@ static const AudioRendererConfig m_ar_config = {
     .num_mix_buffers = 2,
 };
 
-int AudrenAudioRenderer::init(int audio_configuration,
-                              const POPUS_MULTISTREAM_CONFIGURATION opus_config,
-                              void* context, int ar_flags) {
-    m_channel_count = opus_config->channelCount;
-    m_sample_rate = opus_config->sampleRate;
+int AudrenAudioRenderer::init(int channels, int sample_rate) {
+    m_channel_count = 2;
+    m_sample_rate = sample_rate;
     m_buffer_size = m_latency * m_samples_per_frame * sizeof(s16);
     m_samples = m_buffer_size / m_channel_count / sizeof(s16);
     m_current_size = 0;
+    m_total_queued_samples = 0;
 
-    brls::Logger::info("Audren: Init with channels: {}, sample rate: {}",
-                       m_channel_count, m_sample_rate);
+    brls::Logger::info("Audren: Init with stream channels: {}, sample rate: {}",
+                       channels, m_sample_rate);
 
     mutexInit(&m_update_lock);
-
-    m_decoded_buffer =
-        (s16*)malloc(m_channel_count * m_samples_per_frame * sizeof(s16));
-
-    int error;
-    m_decoder = opus_multistream_decoder_create(
-        opus_config->sampleRate, opus_config->channelCount,
-        opus_config->streams, opus_config->coupledStreams, opus_config->mapping,
-        &error);
 
     memset(&m_driver, 0, sizeof(m_driver));
     memset(m_wavebufs, 0, sizeof(m_wavebufs));
@@ -71,13 +51,14 @@ int AudrenAudioRenderer::init(int audio_configuration,
 
     Result rc = audrenInitialize(&m_ar_config);
     if (R_FAILED(rc)) {
-        brls::Logger::error("Audren: audrenInitialize: %x", rc);
+        brls::Logger::error("Audren: audrenInitialize: {:x}", rc);
         return -1;
     }
 
     rc = audrvCreate(&m_driver, &m_ar_config, m_channel_count);
     if (R_FAILED(rc)) {
-        brls::Logger::error("Audren: audrvCreate: %x", rc);
+        brls::Logger::error("Audren: audrvCreate: {:x}", rc);
+        audrenExit();
         return -1;
     }
 
@@ -92,14 +73,17 @@ int AudrenAudioRenderer::init(int audio_configuration,
     m_current_wavebuf = NULL;
 
     int mpid = audrvMemPoolAdd(&m_driver, mempool_ptr, mempool_size);
+    m_mpid = mpid;
     audrvMemPoolAttach(&m_driver, mpid);
 
     audrvDeviceSinkAdd(&m_driver, AUDREN_DEFAULT_DEVICE_NAME, m_channel_count,
                        m_sink_channels);
 
+    audrvUpdate(&m_driver);
+
     rc = audrenStartAudioRenderer();
     if (R_FAILED(rc)) {
-        brls::Logger::error("Audren: audrenStartAudioRenderer: %x", rc);
+        brls::Logger::error("Audren: audrenStartAudioRenderer: {:x}", rc);
     }
 
     audrvVoiceInit(&m_driver, 0, m_channel_count, PcmFormat_Int16,
@@ -113,25 +97,33 @@ int AudrenAudioRenderer::init(int audio_configuration,
     }
 
     audrvVoiceStart(&m_driver, 0);
+    audrvUpdate(&m_driver);
 
     m_inited_driver = true;
 
     brls::Logger::info("Audren: Init done!");
 
-    return DR_OK;
+    return 0;
 }
 
 void AudrenAudioRenderer::cleanup() {
     brls::Logger::info("Audren: Cleanup...");
 
-    if (m_decoder) {
-        opus_multistream_decoder_destroy(m_decoder);
-        m_decoder = nullptr;
-    }
-
-    if (m_decoded_buffer) {
-        free(m_decoded_buffer);
-        m_decoded_buffer = nullptr;
+    if (m_inited_driver) {
+        m_inited_driver = false;
+        audrvVoiceStop(&m_driver, 0);
+        audrvVoiceDrop(&m_driver, 0);
+        if (m_mpid >= 0) {
+            audrvMemPoolDetach(&m_driver, m_mpid);
+        }
+        audrvUpdate(&m_driver);
+        if (m_mpid >= 0) {
+            audrvMemPoolRemove(&m_driver, m_mpid);
+            m_mpid = -1;
+        }
+        audrenStopAudioRenderer();
+        audrvClose(&m_driver);
+        audrenExit();
     }
 
     if (mempool_ptr) {
@@ -139,42 +131,20 @@ void AudrenAudioRenderer::cleanup() {
         mempool_ptr = nullptr;
     }
 
-    if (m_inited_driver) {
-        m_inited_driver = false;
-        audrvVoiceStop(&m_driver, 0);
-        audrvClose(&m_driver);
-        audrenExit();
-    }
+    m_converted.clear();
 
     brls::Logger::info("Audren: Cleanup done!");
 }
 
-void AudrenAudioRenderer::decode_and_play_sample(char* data, int length) {
-    if (m_decoder && m_decoded_buffer) {
-        if (data != NULL && length > 0) {
-            int decoded_samples = opus_multistream_decode(
-                m_decoder, (const unsigned char*)data, length, m_decoded_buffer,
-                m_samples_per_frame, 0);
+void AudrenAudioRenderer::play_pcm(const float* samples, int frame_count,
+                                   int channels) {
+    if (!m_inited_driver || samples == nullptr || frame_count <= 0 || channels <= 0)
+        return;
 
-            if (decoded_samples > 0) {
-                applyVolume(m_decoded_buffer,
-                            static_cast<size_t>(decoded_samples) * m_channel_count,
-                            Settings::instance().get_volume());
-                write_audio(m_decoded_buffer,
-                            decoded_samples * m_channel_count * sizeof(s16));
-            }
-        }
-    } else {
-        brls::Logger::error("Audren: Invalid call of decode_and_play_sample");
-    }
-}
-
-int AudrenAudioRenderer::capabilities() {
-#if defined(PLATFORM_SWITCH)
-    return 0;
-#else
-    return CAPABILITY_DIRECT_SUBMIT;
-#endif
+    m_converted.resize((size_t)frame_count * 2);
+    pcm_f32_to_s16_stereo(samples, frame_count, channels,
+                          Settings::instance().get_volume(), m_converted.data());
+    write_audio(m_converted.data(), m_converted.size() * sizeof(s16));
 }
 
 ssize_t AudrenAudioRenderer::free_wavebuf_index() {
@@ -229,30 +199,13 @@ size_t AudrenAudioRenderer::append_audio(const void* buf, size_t size) {
     return size;
 }
 
-// Drop audren buffer every 400 samples to prevent audio delay
-bool AudrenAudioRenderer::flush() {
-    static int count = 0;
-    count++;
-    if (count == 400) {
-        count = 0;
-        return true;
-    }
-    return false;
-}
-
 void AudrenAudioRenderer::write_audio(const void* buf, size_t size) {
-    if (!m_inited_driver) {
-        brls::Logger::error("Audren: Call write_audio without init driver!");
-        return;
-    }
-
     audrvUpdate(&m_driver);
 
     size_t queued_samples = m_total_queued_samples -
         audrvVoiceGetPlayedSampleCount(&m_driver, 0);
 
-    // If we have over 0.5 desync, drop samples
-    if (queued_samples > m_sample_rate / 2)
+    if (queued_samples > (size_t)(m_sample_rate * m_max_queue_ms / 1000))
         return;
 
     size_t written = 0;

@@ -1,17 +1,27 @@
+// Copyright 2026 Lucas Saavedra Vaz
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 #pragma once
 
 #include "Singleton.hpp"
 #include <borealis.hpp>
+#include <algorithm>
 #include <map>
 #include <cstdio>
 #include <string>
 #include <utility>
 #include <vector>
 
-enum VideoCodec : int { H264, H265, AV1 };
+enum VideoCodec : int { CODEC_H264, CODEC_H265, CODEC_AUTO };
 std::string getVideoCodecName(VideoCodec codec);
 
-enum UpscalingMode : int { UPSCALING_OFF, UPSCALING_METALFX, UPSCALING_FSR1 };
+// How the Switch touchscreen drives the host (punktfunk `touch_mode`).
+enum class TouchMode : int { Trackpad, Pointer, Touch, Off };
+
+// How a frame whose aspect differs from the view fills it (`PUNKTFUNK_VIDEO_FIT_*`).
+enum class PictureFit : int { Fit = 0, Crop = 1, Stretch = 2 };
+
+enum UpscalingMode : int { UPSCALING_OFF, UPSCALING_FSR1 = 2 };
 
 enum AudioBackend : int {
     SDL,
@@ -37,52 +47,51 @@ struct KeyComboOptions {
 
 struct App {
     std::string name;
-    int app_id;
+    // Library id the host launches ("steam:570", "custom:..."); empty = desktop session.
+    std::string app_id;
 };
 
+#define PUNKTFUNK_DEFAULT_PORT 9777
+#define PUNKTFUNK_DEFAULT_MGMT_PORT 47990
+
 struct Host {
-    std::string address;
-    std::string remoteAddress;
+    // Host id from mDNS (`id` TXT key); informational.
+    std::string id;
     std::string hostname;
-    std::string mac;
+    // IPv4 literal or resolvable name.
+    std::string address;
+    int port = PUNKTFUNK_DEFAULT_PORT;
+    // Management API port; 0 = unknown (PUNKTFUNK_DEFAULT_MGMT_PORT).
+    int mgmt_port = 0;
+    // SHA-256 of the host certificate, lowercase hex. Empty until paired; pinned afterwards.
+    std::string fingerprint;
+    // Wake-on-LAN MACs, "aa:bb:cc:dd:ee:ff".
+    std::vector<std::string> macs;
     std::vector<App> favorites;
 
-    [[nodiscard]] std::vector<std::string> connection_addresses() const {
-        std::vector<std::string> addresses;
-        if (!address.empty())
-            addresses.push_back(address);
-        if (!remoteAddress.empty() && remoteAddress != address)
-            addresses.push_back(remoteAddress);
-        return addresses;
-    }
-
-    [[nodiscard]] std::string preferred_address() const {
-        return !address.empty() ? address : remoteAddress;
-    }
-
-    [[nodiscard]] bool has_address(const std::string& value) const {
-        return !value.empty() &&
-               (address == value || remoteAddress == value);
+    [[nodiscard]] bool paired() const { return fingerprint.size() == 64; }
+    [[nodiscard]] std::string preferred_address() const { return address; }
+    [[nodiscard]] int mgmt() const { return mgmt_port > 0 ? mgmt_port : PUNKTFUNK_DEFAULT_MGMT_PORT; }
+    [[nodiscard]] std::string display_name() const {
+        return hostname.empty() ? address : hostname;
     }
 };
 
 inline bool hosts_match(const Host& lhs, const Host& rhs) {
-    if (!lhs.mac.empty() && !rhs.mac.empty())
-        return lhs.mac == rhs.mac;
-
-    for (const auto& address : lhs.connection_addresses()) {
-        if (rhs.has_address(address))
-            return true;
-    }
-
-    return false;
+    if (!lhs.fingerprint.empty() && lhs.fingerprint == rhs.fingerprint)
+        return true;
+    return !lhs.address.empty() && lhs.address == rhs.address && lhs.port == rhs.port;
 }
 
 class Settings : public Singleton<Settings> {
   public:
     [[nodiscard]] std::string working_dir() const { return m_working_dir; }
 
-    void set_working_dir(const std::string& working_dir);
+    void set_working_dir(const std::string& working_dir, bool load_settings = true);
+    // Identity lives under key_dir, which defaults to working_dir/identity.
+    // Self-test uses a separate working_dir so a bloated settings.json cannot
+    // Data Abort json_load, but keeps the real identity for pairing.
+    void set_key_dir(const std::string& key_dir);
 
     [[nodiscard]] std::string launch_path() const { return m_launch_path; }
     void set_launch_path(const std::string& launch_path) { m_launch_path = launch_path; }
@@ -99,10 +108,13 @@ class Settings : public Singleton<Settings> {
 
     void add_host(const Host& host);
     void remove_host(const Host& host);
+    // Replace the stored record of `host` (matched by hosts_match) wholesale, e.g. after
+    // pairing pinned a new fingerprint.
+    void update_host(const Host& previous, const Host& updated);
 
     void add_favorite(const Host& host, const App& app);
-    void remove_favorite(const Host& host, int app_id);
-    bool is_favorite(const Host& host, int app_id);
+    void remove_favorite(const Host& host, const std::string& app_id);
+    bool is_favorite(const Host& host, const std::string& app_id);
     bool has_any_favorite();
 
     [[nodiscard]] int resolution() const { return m_resolution; }
@@ -114,8 +126,11 @@ class Settings : public Singleton<Settings> {
     void set_native_resolution_scale(int native_resolution_scale) {
         switch (native_resolution_scale) {
         case 50:
+        case 67:
         case 75:
         case 100:
+        case 125:
+        case 150:
         case 200:
             m_native_resolution_scale = native_resolution_scale;
             break;
@@ -137,14 +152,28 @@ class Settings : public Singleton<Settings> {
     [[nodiscard]] int bitrate() const { return m_bitrate; }
     void set_bitrate(int bitrate) { m_bitrate = bitrate; }
 
-    [[nodiscard]] bool request_hdr() const { 
-#ifdef SUPPORT_HDR
-        return m_enable_hdr; 
-#else
-        return false; 
-#endif
-    }
-    void set_request_hdr(bool request_hdr) { m_enable_hdr = request_hdr; }
+    // PUNKTFUNK_GAMEPAD_* the host should emulate; 0 = Xbox 360 (PC games).
+    [[nodiscard]] int gamepad_type() const { return m_gamepad_type; }
+    void set_gamepad_type(int type) { m_gamepad_type = type; }
+
+    // Forward Joy-Con / Pro Controller motion (gyro + accelerometer) to the host pad.
+    [[nodiscard]] bool send_motion() const { return m_send_motion; }
+    void set_send_motion(bool value) { m_send_motion = value; }
+
+    // Stats overlay tier punktfunk's HUD formats: 1 compact .. 3 detailed.
+    [[nodiscard]] int stats_tier() const { return m_stats_tier; }
+    void set_stats_tier(int tier) { m_stats_tier = std::clamp(tier, 1, 3); }
+
+    // Leave the host's own speakers playing during the stream.
+    [[nodiscard]] bool keep_host_audio() const { return m_keep_host_audio; }
+    void set_keep_host_audio(bool value) { m_keep_host_audio = value; }
+
+    [[nodiscard]] TouchMode touch_mode() const { return m_touch_mode; }
+    void set_touch_mode(TouchMode mode) { m_touch_mode = mode; }
+    [[nodiscard]] bool touch_uses_trackpad() const { return m_touch_mode == TouchMode::Trackpad; }
+
+    [[nodiscard]] PictureFit picture_fit() const { return m_picture_fit; }
+    void set_picture_fit(PictureFit fit) { m_picture_fit = fit; }
 
     [[nodiscard]] bool upscaling() const {
 #ifdef SUPPORT_UPSCALING
@@ -154,32 +183,17 @@ class Settings : public Singleton<Settings> {
 #endif
     }
     void set_upscaling(bool upscaling) {
-#if defined(PLATFORM_APPLE) && !defined(PLATFORM_TVOS)
-        m_upscaling_mode = upscaling ? UPSCALING_METALFX : UPSCALING_OFF;
-#else
         m_upscaling_mode = upscaling ? UPSCALING_FSR1 : UPSCALING_OFF;
-#endif
     }
     [[nodiscard]] UpscalingMode upscaling_mode() const {
 #ifdef SUPPORT_UPSCALING
-#if defined(PLATFORM_TVOS)
-        return m_upscaling_mode == UPSCALING_OFF ? UPSCALING_OFF : UPSCALING_FSR1;
-#else
         return m_upscaling_mode;
-#endif
 #else
         return UPSCALING_OFF;
 #endif
     }
     void set_upscaling_mode(UpscalingMode mode) {
-#if defined(PLATFORM_APPLE) && !defined(PLATFORM_TVOS)
-        if (mode == UPSCALING_METALFX || mode == UPSCALING_FSR1)
-            m_upscaling_mode = mode;
-        else
-            m_upscaling_mode = UPSCALING_OFF;
-#else
         m_upscaling_mode = mode == UPSCALING_OFF ? UPSCALING_OFF : UPSCALING_FSR1;
-#endif
     }
 
         [[nodiscard]] bool dithering() const {
@@ -241,12 +255,6 @@ class Settings : public Singleton<Settings> {
     void set_frames_queue_size(int frames_queue_size) { m_frames_queue_size = frames_queue_size; }
     [[nodiscard]] int frames_queue_size() const { return m_frames_queue_size; }
 
-    void set_sops(bool sops) { m_sops = sops; }
-    [[nodiscard]] bool sops() const { return m_sops; }
-
-    void set_play_audio(bool play_audio) { m_play_audio = play_audio; }
-    [[nodiscard]] bool play_audio() const { return m_play_audio; }
-
     void set_write_log(bool write_log) { m_write_log = write_log; }
     [[nodiscard]] bool write_log() const { return m_write_log; }
 
@@ -257,9 +265,6 @@ class Settings : public Singleton<Settings> {
     [[nodiscard]] bool swap_joycon_stick_to_dpad() const { return m_swap_joycon_stick_to_dpad; }
 
     void set_swap_mouse_keys(bool swap_mouse_keys) { m_swap_mouse_keys = swap_mouse_keys; }
-    [[nodiscard]] bool touchscreen_mouse_mode() const { return m_touchscreen_mouse_mode; }
-
-    void set_touchscreen_mouse_mode(bool touchscreen_mouse_mode) { m_touchscreen_mouse_mode = touchscreen_mouse_mode; }
     [[nodiscard]] bool swap_mouse_keys() const { return m_swap_mouse_keys; }
 
     void set_swap_mouse_scroll(bool swap_mouse_scroll) { m_swap_mouse_scroll = swap_mouse_scroll; }
@@ -336,18 +341,17 @@ class Settings : public Singleton<Settings> {
     int m_resolution = 720;
     int m_native_resolution_scale = 100;
     int m_fps = 60;
-#ifdef __PSV__
-    VideoCodec m_video_codec = H264;
-#else
-    VideoCodec m_video_codec = H265;
-#endif
+    VideoCodec m_video_codec = CODEC_AUTO;
 #ifdef __SWITCH__
     AudioBackend m_audio_backend = AUDREN;
 #else
     AudioBackend m_audio_backend = SDL;
 #endif
-    int m_bitrate = 10000;
-    bool m_enable_hdr = false;
+    int m_bitrate = 20000;
+    int m_gamepad_type = 0;
+    bool m_send_motion = true;
+    int m_stats_tier = 2;
+    bool m_keep_host_audio = false;
     UpscalingMode m_upscaling_mode = UPSCALING_OFF;
     bool m_enable_dithering = false;
     int m_dithering_strength = 3;
@@ -356,12 +360,11 @@ class Settings : public Singleton<Settings> {
     bool m_click_by_tap = false;
     int m_decoder_threads = 4;
     int m_frames_queue_size = 3;
-    bool m_sops = false;
-    bool m_play_audio = false;
     bool m_write_log = false;
     bool m_swap_ui_keys = false;
     bool m_swap_joycon_stick_to_dpad = false;
-    bool m_touchscreen_mouse_mode = false;
+    TouchMode m_touch_mode = TouchMode::Trackpad;
+    PictureFit m_picture_fit = PictureFit::Fit;
     bool m_swap_mouse_keys = false;
     bool m_swap_mouse_scroll = false;
     int m_rumble_force = 100;

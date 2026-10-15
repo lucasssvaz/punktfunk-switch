@@ -1,3 +1,6 @@
+// Copyright 2026 Lucas Saavedra Vaz
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 #include "about_tab.hpp"
 #include <fmt/core.h>
 
@@ -23,37 +26,24 @@ AboutTab::AboutTab() {
     std::string subtitle = fmt::format(fmt::runtime("about/version"_i18n), APP_VERSION);
     versionLabel->setSubtitle(subtitle);
 
-    std::string githubLink = "https://github.com/XITRIX/Moonlight-Switch";
-    github->addGestureRecognizer(new TapGestureRecognizer(github));
-    github->title->setText("about/link_github"_i18n);
-    github->subtitle->setText(githubLink);
-    github->image->setImageFromRes("img/links/github" + themePart + ".png");
-    github->registerClickAction([githubLink](View* view) {
-        openWebpage(githubLink);
-        return true;
-    });
+    auto wireLink = [&](LinkCell* cell, const std::string& title, const std::string& url,
+                        const std::string& image) {
+        cell->addGestureRecognizer(new TapGestureRecognizer(cell));
+        cell->title->setText(title);
+        cell->subtitle->setText(url);
+        cell->image->setImageFromRes(image);
+        cell->registerClickAction([url](View* view) {
+            openWebpage(url);
+            return true;
+        });
+    };
 
-    std::string patreonLink = "https://www.patreon.com/xitrix";
-    patreon->addGestureRecognizer(new TapGestureRecognizer(patreon));
-    patreon->title->setText("about/link_patreon"_i18n);
-    patreon->subtitle->setText(patreonLink);
-    patreon->image->setImageFromRes("img/links/patreon.png");
-    patreon->registerClickAction([patreonLink](View* view) {
-        openWebpage(patreonLink);
-        return true;
-    });
-
-    std::string gbatempLink =
-        "https://gbatemp.net/threads/"
-        "moonlight-switch-nvidia-game-stream-client.591408/";
-    gbatemp->addGestureRecognizer(new TapGestureRecognizer(gbatemp));
-    gbatemp->title->setText("about/link_gbatemp"_i18n);
-    gbatemp->subtitle->setText(gbatempLink);
-    gbatemp->image->setImageFromRes("img/links/gbatemp.png");
-    gbatemp->registerClickAction([gbatempLink](View* view) {
-        openWebpage(gbatempLink);
-        return true;
-    });
+    wireLink(repo, "about/link_repo"_i18n, "https://github.com/lucasssvaz/punktfunk-switch",
+             "img/links/github" + themePart + ".png");
+    wireLink(punktfunk, "about/link_punktfunk"_i18n, "https://git.unom.io/unom/punktfunk",
+             "img/punktfunk_96.png");
+    wireLink(github, "about/link_github"_i18n, "https://github.com/XITRIX/Moonlight-Switch",
+             "img/links/github" + themePart + ".png");
 }
 
 brls::View* AboutTab::create() { return new AboutTab(); }

@@ -1,0 +1,14 @@
+libsdl2-dev
+libavcodec-dev
+libavformat-dev
+libavutil-dev
+libswscale-dev
+libswresample-dev
+libjansson-dev
+libpng-dev
+libopus-dev
+libva-dev
+libgl-dev
+libegl-dev
+libgles-dev
+libdbus-1-dev

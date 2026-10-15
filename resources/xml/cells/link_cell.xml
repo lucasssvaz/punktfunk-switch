@@ -1,3 +1,5 @@
+<!-- Copyright 2026 Lucas Saavedra Vaz -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 <brls:Box
     width="auto"
     height="auto"
@@ -10,7 +12,7 @@
         id="image"
         width="60"
         height="60"
-        image="@res/img/moonlight_96.png"
+        image="@res/img/punktfunk_96.png"
         scalingType="fit"
         margin="12"/>
 
@@ -34,7 +36,7 @@
             id="subtitle"
             width="auto"
             height="auto"
-            text="https://github.com/XITRIX/Moonlight-Switch"
+            text="https://git.unom.io/unom/punktfunk"
             fontSize="12"
             textColor="@theme/brls/header/subtitle" />
 

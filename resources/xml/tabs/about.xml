@@ -1,3 +1,5 @@
+<!-- Copyright 2026 Lucas Saavedra Vaz -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 <brls:Box
     width="auto"
     height="auto">
@@ -22,7 +24,7 @@
             <brls:Image
                 width="auto"
                 height="160"
-                image="@res/img/moonlight_store_logo.png"
+                image="@res/img/punktfunk_logo.png"
                 scalingType="fit"/>
 
             <brls:Header
@@ -42,14 +44,24 @@
                 title="@i18n/about/links"
                 paddingTop="60"/>
 
+            <LinkCell
+                id="repo"/>
+
+            <LinkCell 
+                id="punktfunk"/>
+
             <LinkCell 
                 id="github"/>
 
-            <LinkCell 
-                id="patreon"/>
+            <brls:Header
+                title="@i18n/about/licenses"
+                paddingTop="60"/>
 
-            <LinkCell 
-                id="gbatemp"/>
+            <brls:Label
+                width="auto"
+                height="auto"
+                fontSize="20"
+                text="@i18n/about/licenses_text"/>
 
             <brls:Header
                 title="@i18n/about/thanks"

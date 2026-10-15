@@ -3,14 +3,16 @@
 //  Moonlight
 //
 //  Created by XITRIX on 26.05.2021.
+//  Copyright 2026 Lucas Saavedra Vaz
 //
-
+//  SPDX-License-Identifier: GPL-3.0-or-later
+//
 #pragma once
 
 #include <cstdint>
+#include <memory>
 #include <borealis.hpp>
 #include "Settings.hpp"
-#include "GameStreamClient.hpp"
 
 class AddHostTab : public brls::Box
 {
@@ -20,16 +22,18 @@ class AddHostTab : public brls::Box
 
     static brls::View* create();
 
+    // PIN pairing or request-access for a probed host; saves it on success.
+    static void chooseTrustMethod(const Host& host);
+
   private:
     void findHost();
     void stopSearchHost();
     void connectHost(const Host& host);
-    void fillSearchBox(const GSResult<std::vector<Host>>& hostsRes);
     void appendSearchHosts(const std::vector<Host>& hosts);
-    static void pauseSearching();
-    static void startSearching();
-    brls::Event<GSResult<std::vector<Host>>>::Subscription searchSubscription;
+    static void pairWithPin(const Host& host);
+    static void requestAccess(const Host& host);
     uint64_t searchGeneration = 0;
+    std::shared_ptr<bool> alive = std::make_shared<bool>(true);
 
     bool searchBoxIpExists(const std::string& ip);
     

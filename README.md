@@ -1,303 +1,211 @@
-# Moonlight-Switch
+# PFSW
 
-Moonlight-Switch is a port of [Moonlight Game Streaming Project](https://github.com/moonlight-stream "Moonlight Game Streaming Project") for Nintendo Switch.
+**Punktfunk for Switch** is a low-latency game streaming client for
+[punktfunk](https://git.unom.io/unom/punktfunk) hosts on the Nintendo Switch.
 
-## Screenshots
-<details>
-  <summary>Preview</summary>
-  <p float="left">
-  <img width="500" src="https://user-images.githubusercontent.com/9553519/135712658-20382345-2da5-4968-9f57-f9f4470ae819.jpg" />
-  <img width="500" src="https://user-images.githubusercontent.com/9553519/135712664-bf2481b2-2791-490d-99a9-2f968682db76.jpg" />
-  <img width="500" src="https://user-images.githubusercontent.com/9553519/135712669-fd8b2495-e1ea-4357-949f-7fa7312da46f.jpg" />
-  <img width="500" src="https://user-images.githubusercontent.com/9553519/135712672-b9ac3785-bd1c-4948-82b2-9b353019feba.jpg" />
-  <img width="500" src="https://user-images.githubusercontent.com/9553519/135712676-aaa85bb7-9517-4a6d-bc35-070df092383c.jpg" />
-  </p>
-</details>
+It is a fork of [Moonlight-Switch](https://github.com/XITRIX/Moonlight-Switch)
+by XITRIX: the borealis UI, NVTegra hardware decoding, deko3d renderer, audio,
+input mapping and NSP forwarder builder are kept. The GameStream / Sunshine
+protocol has been replaced by the punktfunk Rust core (QUIC transport, Opus
+audio, mDNS discovery, management API), cross-compiled with `std` for Horizon.
 
-# Installing
-### Switch
-1. Download latest Moonlight-Switch [release](https://github.com/XITRIX/Moonlight-Switch/releases).
-2. Put Moonlight.nro to sdcard:/switch/Moonlight-Switch;
-3. Launch hbmenu over *Title Redirection* (for FULL RAM access);
-4. Launch moonlight.
-
-Or download it from [HB App Store](https://apps.fortheusers.org/switch/Moonlight-Switch)
-
-> [!TIP]
-> To be able to use high bitrate setting especially with 1080p - resolution, you need to overclock CPU/GPU of your console.
+> [!IMPORTANT]
+> **Not affiliated.** PFSW is unofficial homebrew. It is not affiliated with,
+> endorsed by, or related to Nintendo, NVIDIA, the [Moonlight Game Streaming
+> Project](https://github.com/moonlight-stream), Sunshine, XITRIX, or the
+> punktfunk authors. Moonlight-Switch remains the upstream UI this client is
+> forked from; this is not an official continuation of that project.
 >
-> To learn more about that you can take a look at [Sys-Clk homebrew](https://github.com/retronx-team/sys-clk) or entire [Atmosphere build - 4IFIR](https://github.com/rashevskyv/4IFIR/blob/main/README_ENG.md) which includes everything you need to overclock your console
+> **Trademarks.** “punktfunk” and the lens/wordmark used as this app's icon
+> belong to their respective owners. Using that artwork identifies the protocol
+> this client speaks; it is not a grant of trademark rights and does not make
+> PFSW an official punktfunk product. Nintendo Switch is a trademark of
+> Nintendo Co., Ltd. GitHub and the Invertocat logo are trademarks of
+> GitHub, Inc.
 
 > [!WARNING]
-> I DO NOT RESPOSIBLE FOR ANY DAMAGE TO YOUR CONSOLE IF SOMETHING WILL GO WRONG!
->
-> I am using 4IFIR by myself and not find any issue, but everything is possible. So think by you own head and be responsible for what you do with your devices!
+> This project was built for personal use. I use it regularly on a Switch OLED
+> with Atmosphere, but it has not been tested on other devices or setups.
+> Overclocking (CPU/GPU) via tools like
+> [sys-clk](https://github.com/retronx-team/sys-clk) can help with high
+> bitrates and 1080p. Use at your own risk — you are responsible for anything
+> you do to your console.
 
-### iOS, tvOS and macOS
-Accept [invite for TestFlight](https://testflight.apple.com/join/P9EX5vQ5) and download app from there
+## Installing
 
-## Discord
-Feel free to join [Moonlight discord server](https://discord.gg/fmtcVPzaG4), you will find me there in "switch-help" channel 
+1. Download the latest `punktfunk-switch-*.zip` from
+   [Releases](https://github.com/lucasssvaz/punktfunk-switch/releases).
+2. Extract it to the root of the SD card
+   (`switch/punktfunk/punktfunk.nro` plus a `licenses/` folder).
+3. Start hbmenu through **title redirection** (hold R while launching a game),
+   not the album applet: the stream needs full-memory mode.
+4. Launch **PFSW**, open **Add host**, pick a discovered host (or type
+   `address[:port]`, default port **9777**) and pair.
+
+Pair with the PIN from the host's Pairing page, or **Request access** so the
+host owner can approve the console. Hosts are pinned by certificate
+fingerprint; a changed certificate is flagged before any connection.
+
+Settings, the client identity (`identity/`), the artwork cache and `log.log`
+live in `sdmc:/switch/punktfunk/`. Delete `identity/` to make the console a new
+client (every host has to pair it again). Never share `identity/key.pem`.
 
 ## Controls
+
 ### Mouse
-With touch screen you can move your coursor, tap to left click, scroll 2 fingers to scroll.
 
-While touching screen ZR and ZL buttons will work like left and right mouse buttons.
+With the touch screen you can move the cursor, tap to left-click, and scroll
+with two fingers.
 
-Also while touching screen L and R sticks will work like scrolling wheel.
+While touching the screen, ZR and ZL work as left and right mouse buttons, and
+the L and R sticks work as a scroll wheel.
 
-USB mouse working as well.
+USB mice work as well. Settings also offer touch as trackpad, pointer, native
+touch, or off.
 
 ### Keyboard
-You can use onscreen keyboard, tap 3 fingers on screen to show it.
 
-USB keyboard working as well.
+Tap three fingers on the screen for the on-screen keyboard. USB keyboards work
+as well.
 
 ### Gamepad
-By default, Switch gamepad configured as X360 gamepad (A/B and X/Y swapped). Key mapping available in application settings.
 
-Up to 5 gamepads (includes handheld mode) supported. Half of joycons are also supported.
+By default the Switch gamepad is presented as an Xbox 360 pad (Nintendo A/B and
+X/Y are remapped to the Xbox layout). Mapping is available in Settings.
 
-### SixAxis
-You should configure your Sunshine server to recognise controller as DS4 one to be able to use Gyro and Accelerometer. Only works for player 1 controller.
+Up to five gamepads (including handheld) are supported. Split Joy-Con are also
+supported. The host can emulate a Switch Pro, Xbox 360/One, DualSense or
+DualShock 4 controller.
 
-### Ingame overlay
-To open overlay, press - and + key simultaneously by default or Hold ESC on keyboard.
+### Sixaxis / gyro
 
-Key combination and holding time are configurable in settings.
+Gyro and accelerometer are sent as rich motion input. Configure the host to
+emulate a DualShock 4 if you need sixaxis on the PC side. Handheld / player 1
+only.
+
+### In-game overlay
+
+Press **−** and **+** together by default, or hold Esc on a keyboard. The
+combination and hold time are configurable in Settings.
 
 ## NSP forwarder
-App supports NSP forwarders to start stream immediately with predefined configuration. Add app you want to launch in Favorites list first. You can generate forwarder using [NSP Forwarder Generator](https://nsp-forwarder.vercel.app/moonlight)
 
-### Manually
-If you'd like to create it manually, without help of generator, you'll need to create forwarder which will pass thees arguments to the application:
-- `--ip` - IP address of your PC
-- `--appid` - ID of the app to launch, it has to be added into "Favorites list" (you could find it in /switch/Moonlight-Switch/settings.json)
-- `--appname` - The name of the app without any spacings
+Add a game to **Favorites**, then press **X** on that row to build a forwarder
+that launches straight into the stream.
 
-example:
-`--ip=192.168.1.101 --appid=1233211234 --appname=Steam`
+You can also create a forwarder that passes these arguments:
 
-## iOS / visionOS forwarder / deep link
-iOS and visionOS builds register the `moonlightswitch://` URL scheme. The supported deep link
-uses the same parameters as the Switch forwarder:
+- `--ip` — IP address of the host
+- `--host` — certificate fingerprint (preferred; survives address changes)
+- `--appid` — library id of the app (must be in Favorites; see
+  `sdmc:/switch/punktfunk/settings.json`)
+- `--appname` — display name without spaces
 
-`moonlightswitch://launch?ip=192.168.1.101&appid=1233211234&appname=Steam`
+Example:
 
-`host` can be used instead of `ip` when launching by host MAC address.
-
-iOS 16+ and visionOS builds also expose Shortcuts actions. `Launch Game` accepts a Moonlight
-`Game` value. Use `Get Favorite Games` to pick from saved favorites, or
-`Create Game` to build a game manually from `Host`, `App ID`, and `App Name`,
-then pass the result to `Launch Game`. Use `Get Game Detail` to extract a
-selected game's `App ID`, `Host`, `App Name`, or `Display Host`, and `Get Game
-Deep Link` to create a `moonlightswitch://` URL from a `Game`. Favorite game rows
-use cached box art when available. `Host` accepts either a paired PC IP address
-or MAC address.
-
-Favorite apps can generate an Apple Shortcut forwarder. The forwarder action opens
-the Shortcuts editor and copies the generated deep link to the clipboard as a
-fallback. Prefer the Moonlight `Launch Game` action on iOS 16+ or visionOS, or
-add an `Open URLs` action and paste the copied `moonlightswitch://` URL on older
-iOS versions. Use Shortcuts' `Add to Home Screen` option to create the icon.
+```text
+--ip=192.168.1.101 --appid=steam:570 --appname=Steam
+```
 
 ## Localization
-- English (100%)
-- Russian (100%)
-- German (86%)
-- Spanish (72%)
-- Japanese (70%)
-- Chinese (simplified) (86%)
-- Czech (70%) - unsupported yet, as HOS has no such system language
 
-### Contribution
-If you'd like to improve existing language, or add a new one, follow the instruction:
-1. Ask a permission to modify language [here](https://poeditor.com/join/project?hash=9kiCIvN0dc)
-2. Notify me by [creating an issue](https://github.com/XITRIX/Moonlight-Switch/issues/new) with title "[Localization] - {Name of language}", in description write your nickname on POEditor
-3. After translation is done, notify me in issue created earlier
+Language follows the Horizon system language. There is no in-app language
+picker, so a locale Horizon does not offer cannot be selected.
 
-You have 2 options to add that translation:
-1. If you'd like your profile in "contributors" section, you could add that localization by creating a PR
-2. If you don't care, I could do that by myself
+| Language | Coverage vs English |
+|---|---|
+| English | 100% |
+| German, Spanish, French, Italian, Japanese, Korean, Portuguese (Brazil), Russian, Chinese (Simplified), Chinese (Traditional) | ~83% (punktfunk-specific strings still English) |
 
-If you'd like to test your translation, you could follow build instructions, or ask me to create a build with your localization, I'll attach that build in issue.
+To improve a translation, edit `resources/i18n/<locale>/main.json` and open a
+pull request.
 
-> [!WARNING]
-> Currently there is no way to select language inside of app, it takes from system settings, so it is impossible to add locatization, that HOS doesn't support (that happend with Czech language).
+## Building
 
-## Build Moonlight-Switch
+Everything builds inside the `pf-switch-dev` container (devkitA64, libnx,
+portlibs, and a nightly Rust with `rust-src`). The repository is mounted at
+`/src`, which `punktfunk-rs/.cargo/config.toml` relies on.
 
-```bash
-cd 'folder/to/store/the/sources'
-
-# Clone this repo with submodules
-git clone https://github.com/XITRIX/Moonlight-Switch.git --recursive
-cd Moonlight-Switch
+```sh
+git clone --recursive https://github.com/lucasssvaz/punktfunk-switch.git
+cd punktfunk-switch
+scripts/dev.sh build-image
+scripts/dev.sh bash -c 'cmake --preset switch-release && cmake --build --preset switch-release -j'
+scripts/package-switch.sh    # dist/punktfunk-switch-<version>.zip and dist/punktfunk.nro
 ```
 
-### Switch
+CMake runs `scripts/fetch-patched-crates.sh` on configure, which downloads
+aws-lc-sys (too large to vendor), verifies its checksum and applies
+`punktfunk-rs/patches/series/`. The other crates patched for Horizon are
+vendored under `punktfunk-rs/patches/`.
 
-To build for Switch, a standard development environment must first be set up. In order to do so, [refer to the Getting Started guide](https://devkitpro.org/wiki/Getting_Started).
+The Linux desktop target (`linux-dev` preset; SDL2, system FFmpeg) is a
+development harness for the UI and protocol code. CI builds it; it is not
+released.
 
-```bash
-cmake -B build/switch -DPLATFORM_SWITCH=ON
-make -C build/switch Moonlight.nro -j$(nproc)
-```
+## Testing on hardware
 
-### PS Vita
+See the [PC-first and Switch testing guide](docs/testing-switch.md).
 
-To build for PS Vita, install [VitaSDK](https://vitasdk.org/) and the Vita dependencies described in the [Borealis PS Vita guide](https://github.com/xfangfang/borealis/wiki/PS-Vita). The SDK must include FFmpeg and SDL2 built with `VIDEO_VITA_PVR` support. Set `VITASDK` to the SDK installation directory, then run:
+`nx-test` uploads `punktfunk.nro --self-test` over nxlink, prints TAP on the
+PC, and leaves a PASS/FAIL report on the Switch until **+**. Spike NROs in
+`spike/` (`pf-hello`, `pf-smoke`, `pf-e2e`) isolate lower layers when something
+misbehaves.
 
-```bash
-export VITASDK=/opt/vitasdk
-scripts/psv-dev.sh build
-```
+## Licenses
 
-The resulting package is written to `build/psvita/Moonlight.vpk`. For installing the first VPK, deploying later builds, capturing PrincessLog output, and checking crash dumps, see the [PS Vita development guide](docs/psv-development.md).
+Copyright 2026 Lucas Saavedra Vaz.
 
-### PC (Windows/Linux/MacOS)
-
-To build for PC, the following components are required:
-
-- cmake/make build system
-- A C++ compiler supporting the C++17 standard
-
-Please refer to the usual sources of information for your particular operating system. Usually the commands needed to build this project will look like this:
-
-```bash
-cmake -B build/pc -DPLATFORM_DESKTOP=ON -DCMAKE_BUILD_TYPE=Release
-make -C build/pc -j$(nproc)
-```
-
-Also, please note that the `resources` folder must be available in the working directory, otherwise the program will fail to find the shaders.
-
-On Linux, enabling **Use hardware decoding** makes the FFmpeg decoder try
-VA-API, CUDA, and VDPAU in that order. The selected backend decodes into GPU
-surfaces and copies NV12, P010, or YUV420P frames back for the OpenGL renderer.
-If no compatible device or driver is available, Moonlight automatically falls
-back to software decoding.
-
-#### Linux and SteamOS releases
-
-Linux release builds are available for x86_64 and ARM64 as AppImage, portable
-tar, DEB, and RPM packages. SteamOS builds target Valve's Steam Linux Runtime 4.
-The Linux release configuration embeds resources and requires a VA-API-enabled
-FFmpeg with H.264 and HEVC hardware configurations.
-
-See the [Linux and SteamOS build and installation guide](docs/linux-distribution.md)
-for package selection, Steam Deck setup, local build commands, and the GitHub
-Actions matrix.
-
-#### Windows (MSYS2)
-
-Windows desktop builds are supported through MSYS2 system packages for both x64 and ARM64.
-
-MSYS2 is recommended under `C:\msys64`.
-
-##### x64 (UCRT64)
-
-Install the required packages:
-
-```bash
-pacman -S --needed --noconfirm \
-  mingw-w64-ucrt-x86_64-gcc \
-  mingw-w64-ucrt-x86_64-cmake \
-  mingw-w64-ucrt-x86_64-ninja \
-  mingw-w64-ucrt-x86_64-pkgconf \
-  mingw-w64-ucrt-x86_64-SDL2 \
-  mingw-w64-ucrt-x86_64-ffmpeg \
-  mingw-w64-ucrt-x86_64-curl \
-  mingw-w64-ucrt-x86_64-mbedtls \
-  mingw-w64-ucrt-x86_64-jansson \
-  mingw-w64-ucrt-x86_64-libpng \
-  mingw-w64-ucrt-x86_64-opus \
-  mingw-w64-ucrt-x86_64-expat \
-  mingw-w64-ucrt-x86_64-zstd
-```
-
-Build with the bundled preset:
-
-These Windows presets default to native D3D11 (DirectX 11). Pass `-DUSE_D3D11=OFF` when configuring only if you want to force the legacy OpenGL path.
-
-```bash
-cmake --preset windows-ucrt64-release
-cmake --build --preset windows-ucrt64-release
-```
-
-The resulting executable is placed in `build/windows-ucrt64`. The build stages the required MSYS2 UCRT64 DLLs beside `Moonlight.exe`; keep the generated `resources` directory there as well, because the UCRT64 build uses external resources instead of `libromfs`.
-
-##### ARM64 (CLANGARM64)
-
-To build a native Windows ARM64 executable, install the CLANGARM64 packages:
-
-```bash
-pacman -S --needed --noconfirm \
-  mingw-w64-clang-aarch64-clang \
-  mingw-w64-clang-aarch64-cmake \
-  mingw-w64-clang-aarch64-ninja \
-  mingw-w64-clang-aarch64-pkgconf \
-  mingw-w64-clang-aarch64-SDL2 \
-  mingw-w64-clang-aarch64-ffmpeg \
-  mingw-w64-clang-aarch64-curl \
-  mingw-w64-clang-aarch64-mbedtls \
-  mingw-w64-clang-aarch64-jansson \
-  mingw-w64-clang-aarch64-libpng \
-  mingw-w64-clang-aarch64-opus \
-  mingw-w64-clang-aarch64-expat \
-  mingw-w64-clang-aarch64-zstd
-```
-
-Build with the ARM64 preset:
-
-```bash
-cmake --preset windows-clangarm64-release
-cmake --build --preset windows-clangarm64-release
-```
-
-The resulting executable is placed in `build/windows-clangarm64`. The build stages the required MSYS2 CLANGARM64 DLLs beside `Moonlight.exe`; keep the generated `resources` directory there as well, because the desktop ARM64 build also uses external resources instead of `libromfs`.
-
-### iOS / tvOS:
-
-```shell
-# build libromfs generator
-./build_libromfs_generator.sh
-
-# prepare vcpkg
-./extern/vcpkg/bootstrap-vcpkg.sh
-```
-
-#### 1. Build for arm64 iphoneOS
-
-```shell
-# 1. Generate a Xcode project
-cmake -B build/ios -G Xcode -DPLATFORM_IOS=ON
-
-# 2. open project in Xcode
-open build/ios/*.xcodeproj
-
-# 3. Set up Team and Bundle Identifiers in Xcode, then connect devices to run.
-```
-
-#### 2. Build for arm64 tvOS
-
-```shell
-# 1. Generate a Xcode project
-cmake -B build/tvos -G Xcode -DPLATFORM_TVOS=ON
-
-# 2. open project in Xcode
-open build/tvos/*.xcodeproj
-
-# 3. Set up Team and Bundle Identifiers in Xcode, then connect devices to run.
-```
+The application as a whole is GPL-3.0-or-later (inherited from
+Moonlight-Switch; see [`LICENSE`](LICENSE)). That copyleft stays: Moonlight-Switch,
+sphaira’s forwarder flow, and Iwan Timmer’s SDL audio cannot be relicensed.
+Everything original to PFSW (`punktfunk-rs/` except vendored `patches/`,
+punktfunk integration, spike, scripts, docker, docs) is Apache-2.0. The
+upstream punktfunk core is MIT OR Apache-2.0; this tree uses the Apache-2.0
+side. See [`NOTICE`](NOTICE), [`LICENSE-APACHE`](LICENSE-APACHE) and
+[`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
 
 ## Credits
-Thanks a lot to [Rock88](https://github.com/rock88) and his [Moonlight-NX](https://github.com/rock88/moonlight-nx), lots of streaming code has been lend from it 👍.
 
-[Xfangfang](https://github.com/xfangfang) for maintaining [Borealis](https://github.com/xfangfang/borealis) library. iOS port would not be possible without it. 
+- [XITRIX](https://github.com/XITRIX) and the Moonlight-Switch contributors —
+  this app is built on their work
+- [Rock88](https://github.com/rock88) / [Moonlight-NX](https://github.com/rock88/moonlight-nx) —
+  much of the streaming path
+- [xfangfang](https://github.com/xfangfang) and [Natinusala](https://github.com/natinusala)
+  for [borealis](https://github.com/xfangfang/borealis)
+- [averne](https://github.com/averne) for NVDEC in [FFmpeg](https://github.com/averne/FFmpeg)
+- [Cooler3D](https://github.com/Cooler3Ds) for deko3d help on the Moonlight-Switch side
+- AMD FidelityFX Super Resolution 1.0 EASU/RCAS from
+  [GPUOpen FidelityFX-FSR](https://github.com/GPUOpen-Effects/FidelityFX-FSR)
+  (MIT), used on the Switch deko3d upscaling path
+- The [punktfunk](https://git.unom.io/unom/punktfunk) contributors
 
-[Averne](https://github.com/averne) for NVDEC implementation into [FFmpeg](https://github.com/averne/FFmpeg) and useful guidance of how to enable it 
+## What's next
 
-Also huge thanks to [Cooler3D](https://github.com/Cooler3Ds) for help with Deko3D implementation and solving performance issues
+Streaming, stereo Opus, pad, analog triggers, rumble, gyro, touch, overlay,
+pairing, library and forwarders already work.
 
-The Switch deko3d upscaling path includes AMD FidelityFX Super Resolution 1.0 EASU and RCAS code translated from the MIT-licensed [GPUOpen FidelityFX-FSR](https://github.com/GPUOpen-Effects/FidelityFX-FSR) reference implementation. Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+### Worth doing
+
+- **HD rumble.** Map host rumble to Joy-Con HD rumble instead of fake Xbox
+  dual-motor.
+- **Gyro that stays usable.** Motion is already sent; polish jumpy or
+  unrecognized samples.
+- **Sleep.** End the session cleanly when the console sleeps instead of
+  crashing Atmosphere.
+- **Latency.** Report vsync to the host (`CLIENT_CAP_PHASE_LOCK`).
+- **Per-host bitrate**, and optionally separate Wi-Fi vs Ethernet defaults.
+- **SL / SR** on split Joy-Con for overlay / mouse bindings.
+
+### Skip
+
+- **AV1** — no NVDEC.
+- **Microphone** — 3.5 mm jack has no mic; Joy-Con mics are not worth it.
+- **HDR / 10-bit / 4:4:4 / 5.1 HDMI** — dock is stereo SDR as far as
+  homebrew is concerned; the internal OLED panel is SDR.
+
+## AI-assisted development
+
+A part of this port was written with AI coding tools. Treat it as
+experimental: read the code, test on your own hardware, and do not assume it is
+production-quality. Issues and pull requests are welcome.

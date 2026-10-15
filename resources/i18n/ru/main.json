@@ -1,27 +1,10 @@
 {
-    "about": {
-        "about": "Moonlight-Switch - это сторонний клиент потоковой передачи игр для Nintendo Switch основанный на Moonlight-Common-C",
-        "link_gbatemp": "Страница на GbaTemp",
-        "link_github": "Страница на GitHub",
-        "link_patreon": "Страница на Patreon",
-        "links": "Ссылки",
-        "thanks": "Отдельное спасибо",
-        "thanks_1": " Rock88 и Moonlight-NX, много кода было переиспользовано в этом приложении",
-        "thanks_2": " Natinusala за создание Borealis",
-        "thanks_3": " Команде Moonlight, без них это не было бы возможным",
-        "thanks_4": " Cameron Gutman за помощь в отладке проблемы с LibNX",
-        "thanks_5": " Всем, кто принимал участие в разработке данного приложения",
-        "thanks_6": " Вам, за то что используете моё Homebrew",
-        "title": "О программе",
-        "version": "Moonlight-Switch v{} от XITRIX"
-    },
     "add_host": {
         "connect": "Подключиться",
         "host_ip": "IP Хоста",
         "manual": "Вручную",
         "pair_postfix": " на вашем хосте",
         "pair_prefix": "Подключение\n\nВведите ",
-        "paired_error": "Данный хост уже был привязан\nКонфигурация обновлена",
         "search": "Поиск",
         "search_error": "Поиск недоступен",
         "search_refresh": "Повторить поиск",
@@ -32,10 +15,7 @@
         "run_current": "Открыть запущенное приложение",
         "running": "Запущено",
         "star": "В избранное",
-        "terminate": "Закрыть",
-        "terminate_current_app": "Завершить текущее приложение",
         "terminate_postfix": "\n\nВесь несохранённый прогресс будет утерян",
-        "terminate_prefix": "Закрыть ",
         "unstar": "Убрать из избранного"
     },
     "common": {
@@ -146,9 +126,7 @@
         "overlay_setup_message": "Нажмите клавиши, которые хотите использовать для открытия оверлея:\n\n",
         "overlay_time": "Удерживайте, чтобы открыть (в секундах)",
         "overlay_zero_time": "0 (Немедленно)",
-        "paop": "Воспроизводить аудио на ПК",
         "quality": "Качество (Повышенные настройки требуют разгона CPU)",
-        "request_hdr": "Запрашивать HDR Видео",
         "resolution": "Разрешение",
         "resolution_native": "Родное",
         "resolution_scale": "Масштаб",
@@ -167,11 +145,27 @@
         "touchscreen_mouse_mode": "Touchscreen режим",
         "use_hw_decoding": "Включить аппаратное ускорение",
         "use_system_button": "Использовать системную кнопку",
-        "usops": "Используйте оптимальные игровые настройки",
         "video_bitrate": "Битрейт видео",
         "video_codec": "Видео кодек",
+        "codec_auto": "Авто",
+        "video_fit": "Вписывание кадра",
+        "video_fit_fit": "Вписать (поля)",
+        "video_fit_crop": "Обрезать",
+        "video_fit_stretch": "Растянуть",
+        "touch_mode": "Сенсорный ввод",
+        "touch_mode_trackpad": "Трекпад",
+        "touch_mode_pointer": "Прямой указатель",
+        "touch_mode_touch": "Прямое касание",
+        "touch_mode_off": "Выкл.",
         "volume_amplification": "Разрешить усиление громкости",
-        "zero_threads": "0 (Не использовать потоки)"
+        "zero_threads": "0 (Не использовать потоки)",
+        "keep_host_audio": "Оставить звук на хосте",
+        "stats_tier": "Детализация оверлея статистики",
+        "stats_tier_basic": "Базовый",
+        "stats_tier_standard": "Стандартный",
+        "stats_tier_detailed": "Подробный",
+        "gamepad_type": "Эмулируемый контроллер",
+        "send_motion": "Отправлять движение (гироскоп)"
     },
     "streaming": {
         "connection": "Соединение",
@@ -194,5 +188,5 @@
         "favorites": "Избранные",
         "settings": "Настройки"
     },
-    "title": "Moonlight"
+    "title": "PFSW"
 }

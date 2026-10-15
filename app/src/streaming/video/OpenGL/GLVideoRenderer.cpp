@@ -1,9 +1,14 @@
+// Copyright 2026 Lucas Saavedra Vaz
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 #ifdef USE_GL_RENDERER
 
 #include "GLVideoRenderer.hpp"
+#include "VideoFit.hpp"
 #include "borealis.hpp"
 
 #include "GLShaders.hpp"
+#include "Settings.hpp"
 
 #include <cstring>
 
@@ -272,11 +277,13 @@ void GLVideoRenderer::checkAndInitialize(int width, int height,
 
 void GLVideoRenderer::checkAndUpdateScale(int width, int height,
                                           AVFrame* frame) {
+    const PictureFit pictureFit = Settings::instance().picture_fit();
     bool textureLayoutChanged =
         (m_frame_width != frame->width) ||
         (m_frame_height != frame->height) ||
         (m_screen_width != width) ||
         (m_screen_height != height);
+    const bool fitChanged = m_picture_fit != pictureFit;
 
 #if !defined(__PSV__)
     // Some GLES implementations historically needed this refresh. Recreating
@@ -324,29 +331,24 @@ void GLVideoRenderer::checkAndUpdateScale(int width, int height,
         glUniform3fv(m_offset_location, 1, gl_color_offset(colorFull));
         glUniformMatrix3fv(m_yuvmat_location, 1, GL_FALSE,
                            gl_color_matrix(frame->colorspace, colorFull));
+    }
 
-        float frameAspect = ((float)m_frame_height / (float)m_frame_width);
-        float screenAspect = ((float)m_screen_height / (float)m_screen_width);
-
-        if (frameAspect > screenAspect) {
-            float multiplier = frameAspect / screenAspect;
-            glUniform4f(m_uv_data_location, 0.5f - 0.5f * (1.0f / multiplier),
-                        0.0f, multiplier, 1.0f);
-        } else {
-            float multiplier = screenAspect / frameAspect;
-            glUniform4f(m_uv_data_location, 0.0f,
-                        0.5f - 0.5f * (1.0f / multiplier), 1.0f, multiplier);
-        }
+    if (textureLayoutChanged || fitChanged) {
+        m_picture_fit = pictureFit;
+        const VideoUv uv = video_uv(pictureFit, m_screen_width, m_screen_height,
+                                    m_frame_width, m_frame_height);
+        glUniform4f(m_uv_data_location, uv.offset_x, uv.offset_y, uv.scale_x,
+                    uv.scale_y);
     }
 }
 
 void GLVideoRenderer::draw(NVGcontext* vg, int width, int height,
                            AVFrame* frame, int imageFormat) {
     if (!m_video_render_stats_progress.rendered_frames) {
-        m_video_render_stats_progress.measurement_start_timestamp = LiGetMillis();
+        m_video_render_stats_progress.measurement_start_timestamp = stream_millis();
     }
 
-    uint64_t before_render = LiGetMillis();
+    uint64_t before_render = stream_millis();
 
     checkAndInitialize(width, height, frame);
     if (!m_is_initialized) {
@@ -360,7 +362,7 @@ void GLVideoRenderer::draw(NVGcontext* vg, int width, int height,
     glUseProgram(m_shader_program);
     checkAndUpdateScale(width, height, frame);
 
-    glClearColor(1, 1, 0, 1);
+    glClearColor(0, 0, 0, 1);
     glClear(GL_COLOR_BUFFER_BIT);
 
     for (int i = 0; i < currentFrameTypePlanesNum; i++) {
@@ -390,13 +392,13 @@ void GLVideoRenderer::draw(NVGcontext* vg, int width, int height,
 
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 
-    auto render_time = LiGetMillis() - before_render;
+    auto render_time = stream_millis() - before_render;
 
     m_video_render_stats_progress.total_render_time += render_time;
     m_video_render_stats_progress.rendered_frames++;
 
     const int time_interval = 200;
-    const uint64_t now = LiGetMillis();
+    const uint64_t now = stream_millis();
     if (now - m_video_render_stats_progress.measurement_start_timestamp >=
         time_interval) {
         // brls::Logger::debug("FPS: {}", frames / 5.0f);

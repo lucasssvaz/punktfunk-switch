@@ -1,8 +1,10 @@
+<!-- Copyright 2026 Lucas Saavedra Vaz -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 <brls:AppletFrame
     iconInterpolation="linear"
     footerHidden="false">
     <MainTabs
         id="main_tabs"
         title="@i18n/title"
-        icon="@res/img/moonlight_96.png" />
+        icon="@res/img/punktfunk_96.png" />
 </brls:AppletFrame>

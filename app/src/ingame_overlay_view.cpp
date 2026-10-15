@@ -3,13 +3,16 @@
 //  Moonlight
 //
 //  Created by Даниил Виноградов on 29.05.2021.
+//  Copyright 2026 Lucas Saavedra Vaz
 //
-
+//  SPDX-License-Identifier: GPL-3.0-or-later
+//
 #ifdef PLATFORM_SWITCH
 #include <borealis/platforms/switch/switch_input.hpp>
 #endif
 
 #include "helper.hpp"
+#include "Settings.hpp"
 #include "ingame_overlay_view.hpp"
 #include "streaming_input_overlay.hpp"
 #include "button_selecting_dialog.hpp"
@@ -87,7 +90,7 @@ IngameOverlay::IngameOverlay(StreamingView* streamView)
         [](TapGestureStatus status, Sound* sound) {}));
 
     getAppletFrameItem()->title =
-        streamView->getHost().hostname + ": " + streamView->getApp().name;
+        streamView->getHost().display_name() + ": " + (streamView->getApp().name.empty() ? std::string("Desktop") : streamView->getApp().name);
     updateAppletFrameItem();
 }
 
@@ -237,11 +240,16 @@ OptionsTab::OptionsTab(StreamingView* streamView) : streamView(streamView) {
         }
     });
 
-    touchscreenMouseMode->init("settings/touchscreen_mouse_mode"_i18n,
-                               Settings::instance().touchscreen_mouse_mode(),
-                               [](bool value) {
-                                   Settings::instance().set_touchscreen_mouse_mode(value);
-                               });
+    touchMode->init("settings/touch_mode"_i18n,
+                    {
+                        "settings/touch_mode_trackpad"_i18n,
+                        "settings/touch_mode_pointer"_i18n,
+                        "settings/touch_mode_touch"_i18n,
+                        "settings/touch_mode_off"_i18n,
+                    },
+                    (int)Settings::instance().touch_mode(), [](int selected) {
+                        Settings::instance().set_touch_mode((TouchMode)selected);
+                    });
     
     swapStickToDpad->init("settings/swap_stick_to_dpad"_i18n, Settings::instance().swap_joycon_stick_to_dpad(),
                           [](bool value) { Settings::instance().set_swap_joycon_stick_to_dpad(value); });

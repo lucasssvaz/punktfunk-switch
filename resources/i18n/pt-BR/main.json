@@ -1,27 +1,10 @@
 {
-    "about": {
-        "about": "Moonlight-Switch é um aplicativo terceiro para streaming de jogos baseado no Moonlight-Common-C para Nintendo Switch",
-        "link_gbatemp": "Página do GbaTemp",
-        "link_github": "Página do GitHub",
-        "link_patreon": "Página do Patreon",
-        "links": "Links",
-        "thanks": "Agradecimentos Especiais",
-        "thanks_1": "Rock88 e seu Moonlight-NX, muitos códigos foram reutilizados nesse aplicativo",
-        "thanks_2": " Natinusala por ter criado Borealis",
-        "thanks_3": " Time do Moonlight, sem eles isso não seria possível",
-        "thanks_4": " Cameron Gutman por ajudar a resolver um problema com LibNX",
-        "thanks_5": " Todos envolvidos com o desenvolvimento do aplicativo",
-        "thanks_6": " Você, por usar meu homebrew!",
-        "title": "Sobre",
-        "version": "Moonlight-Switch v{} by XITRIX"
-    },
     "add_host": {
         "connect": "Conectar",
         "host_ip": "Host IP",
         "manual": "Manual",
         "pair_postfix": " no dispositivo host",
         "pair_prefix": "Emparelhar\n\nPressione ",
-        "paired_error": "Emparelhado\nA configuração foi atualizada",
         "search": "Pesquisar",
         "search_error": "Pesquisa indisponível",
         "search_refresh": "Atualizar",
@@ -32,10 +15,7 @@
         "run_current": "Executar aplicativo atual",
         "running": "Em execução",
         "star": "Favoritar",
-        "terminate": "Encerrar",
-        "terminate_current_app": "Encerrar aplicativo atual",
         "terminate_postfix": "\n\nTodo progresso não salvo será perdido",
-        "terminate_prefix": "Encerrar ",
         "unstar": "Desfavoritar"
     },
     "common": {
@@ -146,9 +126,7 @@
         "overlay_setup_message": "Pressione as teclas que você gostaria de usar para abrir a Sobreposição:\n\n",
         "overlay_time": "Segure para abrir em segundos",
         "overlay_zero_time": "0 (Imediatamente)",
-        "paop": "Reproduzir áudio no PC",
         "quality": "Qualidade",
-        "request_hdr": "Request HDR Video",
         "resolution": "Resolução",
         "resolution_native": "Nativa",
         "resolution_scale": "Escala",
@@ -167,11 +145,27 @@
         "touchscreen_mouse_mode": "Touchscreen mode",
         "use_hw_decoding": "Enable hardware acceleration",
         "use_system_button": "Use system button",
-        "usops": "Usar configurações de jogo otimizadas",
         "video_bitrate": "Bitrate do vídeo",
         "video_codec": "Codec de vídeo",
+        "codec_auto": "Automático",
+        "video_fit": "Enquadramento",
+        "video_fit_fit": "Ajustar (barras)",
+        "video_fit_crop": "Recortar",
+        "video_fit_stretch": "Esticar",
+        "touch_mode": "Entrada por toque",
+        "touch_mode_trackpad": "Trackpad",
+        "touch_mode_pointer": "Ponteiro direto",
+        "touch_mode_touch": "Toque direto",
+        "touch_mode_off": "Desligado",
         "volume_amplification": "Permitir amplificação de volume",
-        "zero_threads": "0 (Não usar threads)"
+        "zero_threads": "0 (Não usar threads)",
+        "keep_host_audio": "Manter o áudio no host",
+        "stats_tier": "Detalhe da sobreposição de estatísticas",
+        "stats_tier_basic": "Básico",
+        "stats_tier_standard": "Padrão",
+        "stats_tier_detailed": "Detalhado",
+        "gamepad_type": "Controle emulado",
+        "send_motion": "Enviar movimento (giroscópio)"
     },
     "streaming": {
         "connection": "Conexão",
@@ -194,5 +188,5 @@
         "favorites": "Favoritos",
         "settings": "Configurações"
     },
-    "title": "Moonlight"
+    "title": "PFSW"
 }

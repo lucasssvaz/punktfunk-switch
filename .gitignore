@@ -1,6 +1,46 @@
 cmake-build-debug
 .DS_Store
 libromfs-generator
-build*
-vcpkg_installed
+build/
 .psv-logs/
+.cache/
+dist/
+/logs
+
+punktfunk-rs/target/
+punktfunk-rs/shims/build/
+# Materialised by scripts/fetch-patched-crates.sh; only series/aws-lc-sys-*.patch is source.
+punktfunk-rs/patches/aws-lc-sys/
+extern/punktfunk/target/
+
+spike/build-*/
+spike/*.nro
+spike/*.elf
+spike/*.nacp
+spike/*.map
+
+# cargo package / `patch` leftovers next to vendored crates
+*.orig
+*.rej
+
+compile_commands.json
+CMakeUserPresets.json
+.clangd/
+
+__pycache__/
+*.pyc
+
+# Never commit a key copied off the Switch SD
+**/identity/key.pem
+
+# Ignore files built by Visual Studio/Visual Micro and other IDEs
+[Dd]ebug/
+[Rr]elease/
+.vs/
+__vm/
+*.vcxproj*
+platform.sloeber.txt
+boards.sloeber.txt
+/.idea/
+.vscode/
+*.code-workspace

@@ -3,8 +3,10 @@
 //  Moonlight
 //
 //  Adapted from sphaira's forwarder builder/installer flow.
+//  Copyright 2026 Lucas Saavedra Vaz
 //
-
+//  SPDX-License-Identifier: GPL-3.0-or-later
+//
 #include <forwarder_maker.hpp>
 #include <borealis.hpp>
 
@@ -16,8 +18,9 @@ using namespace brls::literals;
 #include <Settings.hpp>
 
 #include "BoxArtManager.hpp"
-#include "Data.hpp"
 
+#include <fstream>
+#include <iterator>
 #include <string>
 
 namespace {
@@ -46,16 +49,16 @@ std::string buildForwarderArgs(const Host& host, const App& app) {
         args += value;
     };
 
-    if (!host.mac.empty()) {
-        append("--host=" + host.mac);
-    } else {
-        const auto preferredAddress = host.preferred_address();
-        if (!preferredAddress.empty()) {
-            append("--ip=" + preferredAddress);
-        }
+    if (host.paired()) {
+        append("--host=" + host.fingerprint);
+    }
+    if (!host.address.empty()) {
+        append("--ip=" + host.address);
     }
 
-    append("--appid=" + std::to_string(app.app_id));
+    if (!app.app_id.empty()) {
+        append("--appid=" + encodeAppName(app.app_id));
+    }
     append("--appname=" + encodeAppName(app.name));
     return args;
 }
@@ -63,20 +66,6 @@ std::string buildForwarderArgs(const Host& host, const App& app) {
 } // namespace
 #endif
 
-#if defined(PLATFORM_IOS)
-namespace {
-
-void showShortcutsAlert() {
-    auto* dialog = new brls::Dialog("forwarder/shortcuts_message"_i18n);
-    dialog->addButton("common/close"_i18n, [] {});
-    dialog->addButton("forwarder/open_shortcuts"_i18n, [] {
-        brls::Application::getPlatform()->openBrowser("shortcuts://create-shortcut");
-    });
-    dialog->open();
-}
-
-} // namespace
-#endif
 
 #ifdef __SWITCH__
 
@@ -1190,12 +1179,12 @@ Result invalidateApplicationControlCache(u64 tid) {
 }
 
 std::vector<u8> readFileBytes(const std::string& path) {
-    Data data = Data::read_from_file(path);
-    if (data.is_empty()) {
+    std::ifstream file(path, std::ios::binary);
+    if (!file) {
         return {};
     }
 
-    return {data.bytes(), data.bytes() + data.size()};
+    return {std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};
 }
 
 std::string formatNroPathForForwarder(std::string path) {
@@ -1336,8 +1325,8 @@ void blendBadgePixel(std::vector<u8>& canvas, size_t canvas_offset, const std::v
     canvas[canvas_offset + 3] = 255;
 }
 
-void overlayMoonlightBadge(std::vector<u8>& rgba, int width, int height) {
-    auto badge_bytes = readFileBytes("romfs:/img/moonlight_96.png");
+void overlayAppBadge(std::vector<u8>& rgba, int width, int height) {
+    auto badge_bytes = readFileBytes("romfs:/img/punktfunk_96.png");
     if (badge_bytes.empty()) {
         return;
     }
@@ -1388,7 +1377,7 @@ std::vector<u8> encodeJpeg(std::span<const u8> rgba, int width, int height) {
     return {};
 }
 
-std::vector<u8> normalizeForwarderIcon(std::span<const u8> bytes, bool add_moonlight_logo) {
+std::vector<u8> normalizeForwarderIcon(std::span<const u8> bytes, bool add_badge) {
     auto image = decodeRgbaImage(bytes);
     if (image.rgba.empty()) {
         return {bytes.begin(), bytes.end()};
@@ -1400,8 +1389,8 @@ std::vector<u8> normalizeForwarderIcon(std::span<const u8> bytes, bool add_moonl
         image.height = 256;
     }
 
-    if (add_moonlight_logo) {
-        overlayMoonlightBadge(image.rgba, image.width, image.height);
+    if (add_badge) {
+        overlayAppBadge(image.rgba, image.width, image.height);
     }
 
     const auto jpeg = encodeJpeg(image.rgba, image.width, image.height);
@@ -1412,15 +1401,15 @@ std::vector<u8> normalizeForwarderIcon(std::span<const u8> bytes, bool add_moonl
     return {bytes.begin(), bytes.end()};
 }
 
-std::vector<u8> resolveForwarderIcon(const App& app, bool add_moonlight_logo) {
-    auto icon = readFileBytes(BoxArtManager::get_texture_path(app.app_id));
+std::vector<u8> resolveForwarderIcon(const Host& host, const App& app, bool add_badge) {
+    auto icon = app.app_id.empty() ? std::vector<u8>{} : readFileBytes(BoxArtManager::get_texture_path(host, app.app_id));
     if (!icon.empty()) {
-        return normalizeForwarderIcon(icon, add_moonlight_logo);
+        return normalizeForwarderIcon(icon, add_badge);
     }
 
     icon = readFileBytes("romfs:/forwarder/control/icon_AmericanEnglish.dat");
     if (!icon.empty()) {
-        return normalizeForwarderIcon(icon, add_moonlight_logo);
+        return normalizeForwarderIcon(icon, add_badge);
     }
 
     return {};
@@ -1435,13 +1424,13 @@ NacpStruct getBaseNacp() {
     return nacp;
 }
 
-Result installForwarder(const Host& host, const App& app, bool add_moonlight_logo) {
+Result installForwarder(const Host& host, const App& app, bool add_badge) {
     const std::string nro_path = formatNroPathForForwarder(Settings::instance().launch_path());
     if (nro_path.empty()) {
         return MAKERESULT(Module_Libnx, LibnxError_BadInput);
     }
 
-    const auto icon = resolveForwarderIcon(app, add_moonlight_logo);
+    const auto icon = resolveForwarderIcon(host, app, add_badge);
     if (icon.empty()) {
         return MAKERESULT(Module_Libnx, LibnxError_NotFound);
     }
@@ -1510,7 +1499,7 @@ Result installForwarder(const Host& host, const App& app, bool add_moonlight_log
     NacpStruct nacp = getBaseNacp();
     NacpPatch nacp_patch{
         .name = app.name,
-        .author = host.hostname.empty() ? "Moonlight" : host.hostname,
+        .author = host.display_name().empty() ? "punktfunk" : host.display_name(),
         .tid = tid,
     };
     patchNacp(nacp, nacp_patch);
@@ -1620,26 +1609,16 @@ Result installForwarder(const Host& host, const App& app, bool add_moonlight_log
 
 } // namespace
 
-int makeForwarder(const Host& host, const App& app, bool add_moonlight_logo) {
-    return static_cast<int>(installForwarder(host, app, add_moonlight_logo));
-}
-
-#elif defined(PLATFORM_IOS)
-
-int makeForwarder(const Host& host, const App& app, bool add_moonlight_logo) {
-    (void)host;
-    (void)app;
-    (void)add_moonlight_logo;
-    showShortcutsAlert();
-    return EXIT_SUCCESS;
+int makeForwarder(const Host& host, const App& app, bool add_badge) {
+    return static_cast<int>(installForwarder(host, app, add_badge));
 }
 
 #else
 
-int makeForwarder(const Host& host, const App& app, bool add_moonlight_logo) {
+int makeForwarder(const Host& host, const App& app, bool add_badge) {
     (void)host;
     (void)app;
-    (void)add_moonlight_logo;
+    (void)add_badge;
     return EXIT_FAILURE;
 }
 

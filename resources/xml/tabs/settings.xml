@@ -1,3 +1,5 @@
+<!-- Copyright 2026 Lucas Saavedra Vaz -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 <brls:Box
     width="auto"
     height="auto">
@@ -34,14 +36,11 @@
             <brls:SelectorCell
                 id="codec"/>
 
-            <brls:BooleanCell
-                id="request_hdr"/>
-                
+            <brls:SelectorCell
+                id="video_fit"/>
+
             <brls:SelectorCell
                 id="decoder"/>
-
-            <brls:BooleanCell
-                id="use_hw_decoding"/>
 
             <brls:Header
                 id="header"
@@ -77,14 +76,11 @@
                 title="@i18n/settings/stream_settings"
                 paddingTop="60"/>
 
-            <brls:SelectorCell
-                id="audio_backend"/>
+            <brls:BooleanCell
+                id="keep_host_audio"/>
 
-            <brls:BooleanCell
-                id="optimal"/>
-            
-            <brls:BooleanCell
-                id="pcAudio"/>
+            <brls:SelectorCell
+                id="stats_tier"/>
                 
             <brls:BooleanCell
                 id="volume_amplification"/>
@@ -93,6 +89,12 @@
                 title="@i18n/settings/keys"
                 paddingTop="60"/>
                 
+            <brls:SelectorCell
+                id="gamepad_type"/>
+
+            <brls:BooleanCell
+                id="send_motion"/>
+
             <brls:BooleanCell
                 id="swap_ui"/>
                 
@@ -176,8 +178,8 @@
                 title="@i18n/settings/mouse"
                 paddingTop="60"/>
 
-            <brls:BooleanCell
-                id="touchscreen_mouse_mode"/>
+            <brls:SelectorCell
+                id="touch_mode"/>
                 
             <brls:BooleanCell
                 id="swap_mouse_keys"/>

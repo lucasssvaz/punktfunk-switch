@@ -1,6 +1,10 @@
+// Copyright 2026 Lucas Saavedra Vaz
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 #include "Settings.hpp"
 #include <jansson.h>
 #include <algorithm>
+#include <cstdio>
 #include <cstring>
 #include <iomanip>
 #include <climits>
@@ -27,14 +31,30 @@ const Host* find_host(const std::vector<Host>& hosts, const Host& target) {
 }
 
 void merge_host(Host& target, const Host& source) {
+    if (!source.id.empty())
+        target.id = source.id;
     if (!source.address.empty())
         target.address = source.address;
-    if (!source.remoteAddress.empty())
-        target.remoteAddress = source.remoteAddress;
+    if (source.port > 0)
+        target.port = source.port;
+    if (source.mgmt_port > 0)
+        target.mgmt_port = source.mgmt_port;
     if (!source.hostname.empty())
         target.hostname = source.hostname;
-    if (!source.mac.empty())
-        target.mac = source.mac;
+    if (!source.fingerprint.empty())
+        target.fingerprint = source.fingerprint;
+    if (!source.macs.empty())
+        target.macs = source.macs;
+}
+
+std::string json_string_or(json_t* obj, const char* key, const std::string& fallback = "") {
+    json_t* value = json_object_get(obj, key);
+    return value && json_typeof(value) == JSON_STRING ? json_string_value(value) : fallback;
+}
+
+int json_int_or(json_t* obj, const char* key, int fallback) {
+    json_t* value = json_object_get(obj, key);
+    return value && json_typeof(value) == JSON_INTEGER ? (int)json_integer_value(value) : fallback;
 }
 
 std::string make_preferred_path(const fs::path& path) {
@@ -50,22 +70,21 @@ std::string settings_file_path(const std::string& working_dir) {
 
 std::string getVideoCodecName(VideoCodec codec) {
     switch (codec) {
-        case H264:
+        case CODEC_H264:
             return "settings/h264"_i18n;
-        case H265:
+        case CODEC_H265:
             return "settings/h265"_i18n;
-        case AV1:
-            return "settings/av1"_i18n;
+        case CODEC_AUTO:
         default:
-            return "settings/h264"_i18n;
+            return "settings/codec_auto"_i18n;
     }
 }
 
-void Settings::set_working_dir(const std::string& working_dir) {
+void Settings::set_working_dir(const std::string& working_dir, bool load_settings) {
     const fs::path base_path = fs::path(working_dir).make_preferred();
 
     m_working_dir = base_path.string();
-    m_key_dir = make_preferred_path(base_path / "key");
+    m_key_dir = make_preferred_path(base_path / "identity");
     m_boxart_dir = make_preferred_path(base_path / "boxart");
     m_log_path = make_preferred_path(base_path / "log.log");
     m_gamepad_mapping_path =
@@ -75,17 +94,40 @@ void Settings::set_working_dir(const std::string& working_dir) {
     fs::create_directories(base_path, error);
     fs::create_directories(fs::path(m_key_dir), error);
     fs::create_directories(fs::path(m_boxart_dir), error);
-    
-    load();
+
+    if (load_settings) {
+        load();
+    } else {
+        std::error_code io_error;
+        fs::remove(settings_file_path(m_working_dir), io_error);
+    }
+}
+
+void Settings::set_key_dir(const std::string& key_dir) {
+    m_key_dir = make_preferred_path(fs::path(key_dir));
+    std::error_code error;
+    fs::create_directories(fs::path(m_key_dir), error);
 }
 
 void Settings::add_host(const Host& host) {
     if (Host* existing = find_host(m_hosts, host)) {
         merge_host(*existing, host);
-    } else if (!host.preferred_address().empty() && !host.mac.empty()) {
+    } else if (!host.address.empty()) {
         m_hosts.push_back(host);
     }
 
+    save();
+}
+
+void Settings::update_host(const Host& previous, const Host& updated) {
+    if (Host* existing = find_host(m_hosts, previous)) {
+        auto favorites = existing->favorites;
+        *existing = updated;
+        if (existing->favorites.empty())
+            existing->favorites = favorites;
+    } else if (!updated.address.empty()) {
+        m_hosts.push_back(updated);
+    }
     save();
 }
 
@@ -115,7 +157,7 @@ void Settings::add_favorite(const Host& host, const App& app) {
     }
 }
 
-void Settings::remove_favorite(const Host& host, int app_id) {
+void Settings::remove_favorite(const Host& host, const std::string& app_id) {
     if (Host* existing = find_host(m_hosts, host)) {
         auto app_it = std::find_if(existing->favorites.begin(), existing->favorites.end(), [app_id](auto h){
             return h.app_id == app_id;
@@ -128,7 +170,7 @@ void Settings::remove_favorite(const Host& host, int app_id) {
     }
 }
 
-bool Settings::is_favorite(const Host& host, int app_id) {
+bool Settings::is_favorite(const Host& host, const std::string& app_id) {
     if (const Host* existing = find_host(m_hosts, host)) {
         auto app_it = std::find_if(existing->favorites.begin(), existing->favorites.end(), [app_id](auto h){
             return h.app_id == app_id;
@@ -149,43 +191,63 @@ bool Settings::has_any_favorite() {
 }
 
 void Settings::load() {
+    m_hosts.clear();
+    m_mapping_laouts.clear();
     loadBaseLayouts();
 
-    json_t* root = json_load_file(settings_file_path(m_working_dir).c_str(), 0, nullptr);
-    
-    if (root && json_typeof(root) == JSON_OBJECT) {
+    const std::string path = settings_file_path(m_working_dir);
+    std::error_code io_error;
+    const auto file_size = fs::file_size(path, io_error);
+    if (io_error)
+        return;
+
+    // jansson mallocs the whole tree. A bloated hosts array (or a previous
+    // load() that appended instead of replacing) Data Aborts after deko3d.
+    // 8 KiB is plenty for a handful of hosts; quarantine anything larger.
+    constexpr uintmax_t kMaxSettingsBytes = 8 * 1024;
+    if (file_size > kMaxSettingsBytes) {
+        Logger::error("settings.json is {} bytes (limit {}); ignoring bloated file",
+                      static_cast<unsigned long long>(file_size),
+                      static_cast<unsigned long long>(kMaxSettingsBytes));
+        fs::rename(path, path + ".corrupt", io_error);
+        return;
+    }
+
+    char buf[8 * 1024 + 1];
+    FILE* file = fopen(path.c_str(), "rb");
+    if (!file)
+        return;
+    const size_t n = fread(buf, 1, sizeof(buf) - 1, file);
+    fclose(file);
+    buf[n] = '\0';
+
+    json_error_t parse_error{};
+    json_t* root = json_loadb(buf, n, 0, &parse_error);
+    if (!root) {
+        if (n > 0)
+            Logger::error("settings.json parse error line {}: {}", parse_error.line, parse_error.text);
+        return;
+    }
+
+    if (json_typeof(root) == JSON_OBJECT) {
         if (json_t* hosts = json_object_get(root, "hosts")) {
             size_t size = json_array_size(hosts);
             for (size_t i = 0; i < size; i++) {
                 if (json_t* json = json_array_get(hosts, i)) {
                     if (json_typeof(json) == JSON_OBJECT) {
                         Host host;
-                        
-                        if (json_t* address = json_object_get(json, "address")) {
-                            if (json_typeof(address) == JSON_STRING) {
-                                host.address = json_string_value(address);
-                            }
-                        }
+                        host.id = json_string_or(json, "id");
+                        host.hostname = json_string_or(json, "hostname");
+                        host.address = json_string_or(json, "address");
+                        host.port = json_int_or(json, "port", PUNKTFUNK_DEFAULT_PORT);
+                        host.mgmt_port = json_int_or(json, "mgmt_port", 0);
+                        host.fingerprint = json_string_or(json, "fingerprint");
 
-                        if (json_t* remoteAddress = json_object_get(json, "remote_address")) {
-                            if (json_typeof(remoteAddress) == JSON_STRING) {
-                                host.remoteAddress = json_string_value(remoteAddress);
-                            }
-                        } else if (json_t* legacyRemoteAddress = json_object_get(json, "remoteAddress")) {
-                            if (json_typeof(legacyRemoteAddress) == JSON_STRING) {
-                                host.remoteAddress = json_string_value(legacyRemoteAddress);
-                            }
-                        }
-                        
-                        if (json_t* hostname = json_object_get(json, "hostname")) {
-                            if (json_typeof(hostname) == JSON_STRING) {
-                                host.hostname = json_string_value(hostname);
-                            }
-                        }
-                        
-                        if (json_t* mac = json_object_get(json, "mac")) {
-                            if (json_typeof(mac) == JSON_STRING) {
-                                host.mac = json_string_value(mac);
+                        if (json_t* macs = json_object_get(json, "macs")) {
+                            for (size_t m = 0; m < json_array_size(macs); m++) {
+                                json_t* mac = json_array_get(macs, m);
+                                if (mac && json_typeof(mac) == JSON_STRING)
+                                    host.macs.push_back(json_string_value(mac));
                             }
                         }
 
@@ -195,26 +257,18 @@ void Settings::load() {
                                 if (json_t* json = json_array_get(favorites, i)) {
                                     if (json_typeof(json) == JSON_OBJECT) {
                                         App app;
-
-                                        if (json_t* name = json_object_get(json, "name")) {
-                                            if (json_typeof(name) == JSON_STRING) {
-                                                app.name = json_string_value(name);
-                                            }
-                                        }
-
-                                        if (json_t* id = json_object_get(json, "id")) {
-                                            if (json_typeof(id) == JSON_INTEGER) {
-                                                app.app_id = (int)json_integer_value(id);
-                                            }
-                                        }
-                                        
+                                        app.name = json_string_or(json, "name");
+                                        app.app_id = json_string_or(json, "id");
                                         host.favorites.push_back(app);
                                     }
                                 }
                             }
                         }
-                        
-                        m_hosts.push_back(host);
+
+                        if (Host* existing = find_host(m_hosts, host))
+                            merge_host(*existing, host);
+                        else if (m_hosts.size() < 32)
+                            m_hosts.push_back(host);
                     }
                 }
             }
@@ -241,7 +295,10 @@ void Settings::load() {
             
             if (json_t* video_codec = json_object_get(settings, "video_codec")) {
                 if (json_typeof(video_codec) == JSON_INTEGER) {
-                    m_video_codec = (VideoCodec)json_integer_value(video_codec);
+                    int codec = (int)json_integer_value(video_codec);
+                    m_video_codec = codec == CODEC_H264   ? CODEC_H264
+                                    : codec == CODEC_AUTO ? CODEC_AUTO
+                                                          : CODEC_H265;
                 }
             }
 
@@ -261,8 +318,15 @@ void Settings::load() {
                 }
             }
 
-            if (json_t* enable_hdr = json_object_get(settings, "enable_hdr")) {
-                m_enable_hdr = json_typeof(enable_hdr) == JSON_TRUE;
+            m_gamepad_type = json_int_or(settings, "gamepad_type", m_gamepad_type);
+            set_stats_tier(json_int_or(settings, "stats_tier", m_stats_tier));
+
+            if (json_t* send_motion = json_object_get(settings, "send_motion")) {
+                m_send_motion = json_typeof(send_motion) == JSON_TRUE;
+            }
+
+            if (json_t* keep_host_audio = json_object_get(settings, "keep_host_audio")) {
+                m_keep_host_audio = json_typeof(keep_host_audio) == JSON_TRUE;
             }
 
             if (json_t* enable_upscaling = json_object_get(settings, "enable_upscaling")) {
@@ -318,14 +382,6 @@ void Settings::load() {
                 m_use_hw_decoding = json_typeof(hw_decoding) == JSON_TRUE;
             }
 
-            if (json_t* sops = json_object_get(settings, "sops")) {
-                m_sops = json_typeof(sops) == JSON_TRUE;
-            }
-            
-            if (json_t* play_audio = json_object_get(settings, "play_audio")) {
-                m_play_audio = json_typeof(play_audio) == JSON_TRUE;
-            }
-            
             if (json_t* write_log = json_object_get(settings, "write_log")) {
                 m_write_log = json_typeof(write_log) == JSON_TRUE;
             }
@@ -338,9 +394,19 @@ void Settings::load() {
                 m_swap_joycon_stick_to_dpad = json_typeof(swap_joycon_stick_to_dpad) == JSON_TRUE;
             }
 
-            if (json_t* touchscreen_mouse_mode = json_object_get(settings, "touchscreen_mouse_mode")) {
-                m_touchscreen_mouse_mode = json_typeof(touchscreen_mouse_mode) == JSON_TRUE;
+            if (json_t* touch_mode = json_object_get(settings, "touch_mode")) {
+                if (json_typeof(touch_mode) == JSON_INTEGER) {
+                    int mode = (int)json_integer_value(touch_mode);
+                    if (mode >= 0 && mode <= (int)TouchMode::Off)
+                        m_touch_mode = (TouchMode)mode;
+                }
+            } else if (json_t* touchscreen_mouse_mode = json_object_get(settings, "touchscreen_mouse_mode")) {
+                if (json_typeof(touchscreen_mouse_mode) == JSON_TRUE)
+                    m_touch_mode = TouchMode::Pointer;
             }
+
+            m_picture_fit = (PictureFit)std::clamp(
+                json_int_or(settings, "video_fit", (int)m_picture_fit), 0, (int)PictureFit::Stretch);
             
             if (json_t* swap_mouse_keys = json_object_get(settings, "swap_mouse_keys")) {
                 m_swap_mouse_keys = json_typeof(swap_mouse_keys) == JSON_TRUE;
@@ -498,9 +564,9 @@ void Settings::load() {
                 }
             }
         }
-        
-        json_decref(root);
     }
+
+    json_decref(root);
 }
 
 void Settings::save() {
@@ -510,15 +576,22 @@ void Settings::save() {
         if (json_t* hosts = json_array()) {
             for (const auto& host: m_hosts) {
                 if (json_t* json = json_object()) {
-                    json_object_set_new(json, "address", json_string(host.address.c_str()));
-                    json_object_set_new(json, "remote_address", json_string(host.remoteAddress.c_str()));
+                    json_object_set_new(json, "id", json_string(host.id.c_str()));
                     json_object_set_new(json, "hostname", json_string(host.hostname.c_str()));
-                    json_object_set_new(json, "mac", json_string(host.mac.c_str()));
+                    json_object_set_new(json, "address", json_string(host.address.c_str()));
+                    json_object_set_new(json, "port", json_integer(host.port));
+                    json_object_set_new(json, "mgmt_port", json_integer(host.mgmt_port));
+                    json_object_set_new(json, "fingerprint", json_string(host.fingerprint.c_str()));
+                    if (json_t* macs = json_array()) {
+                        for (const auto& mac : host.macs)
+                            json_array_append_new(macs, json_string(mac.c_str()));
+                        json_object_set_new(json, "macs", macs);
+                    }
                     if (json_t* apps = json_array()) {
                         for (auto app: host.favorites) {
                             if (json_t* jsonApp = json_object()) {
                                 json_object_set_new(jsonApp, "name", json_string(app.name.c_str()));
-                                json_object_set_new(jsonApp, "id", json_integer(app.app_id));
+                                json_object_set_new(jsonApp, "id", json_string(app.app_id.c_str()));
                                 json_array_append_new(apps, jsonApp);
                             }
                         }
@@ -539,7 +612,10 @@ void Settings::save() {
             json_object_set_new(settings, "bitrate", json_integer(m_bitrate));
             json_object_set_new(settings, "decoder_threads", json_integer(m_decoder_threads));
             json_object_set_new(settings, "frames_queue_size", json_integer(m_frames_queue_size));
-            json_object_set_new(settings, "enable_hdr", m_enable_hdr ? json_true() : json_false());
+            json_object_set_new(settings, "gamepad_type", json_integer(m_gamepad_type));
+            json_object_set_new(settings, "stats_tier", json_integer(m_stats_tier));
+            json_object_set_new(settings, "send_motion", m_send_motion ? json_true() : json_false());
+            json_object_set_new(settings, "keep_host_audio", m_keep_host_audio ? json_true() : json_false());
             json_object_set_new(settings, "enable_upscaling", upscaling() ? json_true() : json_false());
             json_object_set_new(settings, "upscaling_mode", json_integer(upscaling_mode()));
             json_object_set_new(settings, "enable_dithering", m_enable_dithering ? json_true() : json_false());
@@ -548,12 +624,11 @@ void Settings::save() {
             json_object_set_new(settings, "rcas_strength", json_integer(m_rcas_strength));
             json_object_set_new(settings, "click_by_tap", m_click_by_tap ? json_true() : json_false());
             json_object_set_new(settings, "use_hw_decoding", m_use_hw_decoding ? json_true() : json_false());
-            json_object_set_new(settings, "sops", m_sops ? json_true() : json_false());
-            json_object_set_new(settings, "play_audio", m_play_audio ? json_true() : json_false());
             json_object_set_new(settings, "write_log", m_write_log ? json_true() : json_false());
             json_object_set_new(settings, "swap_ui_keys", m_swap_ui_keys ? json_true() : json_false());
             json_object_set_new(settings, "swap_joycon_stick_to_dpad", m_swap_joycon_stick_to_dpad ? json_true() : json_false());
-            json_object_set_new(settings, "touchscreen_mouse_mode", m_touchscreen_mouse_mode ? json_true() : json_false());
+            json_object_set_new(settings, "touch_mode", json_integer((int)m_touch_mode));
+            json_object_set_new(settings, "video_fit", json_integer((int)m_picture_fit));
             json_object_set_new(settings, "swap_mouse_keys", m_swap_mouse_keys ? json_true() : json_false());
             json_object_set_new(settings, "swap_mouse_scroll", m_swap_mouse_scroll ? json_true() : json_false());
             json_object_set_new(settings, "volume_amplification", m_volume_amplification ? json_true() : json_false());
@@ -612,7 +687,16 @@ void Settings::save() {
             json_object_set_new(root, "mapping_layouts", hosts);
         }
         
-        json_dump_file(root, settings_file_path(m_working_dir).c_str(), JSON_INDENT(4));
+        const std::string path = settings_file_path(m_working_dir);
+        const std::string tmp = path + ".tmp";
+        if (json_dump_file(root, tmp.c_str(), JSON_INDENT(4)) == 0) {
+            std::error_code io_error;
+            fs::rename(tmp, path, io_error);
+            if (io_error) {
+                fs::remove(path, io_error);
+                fs::rename(tmp, path, io_error);
+            }
+        }
         json_decref(root);
     }
 }

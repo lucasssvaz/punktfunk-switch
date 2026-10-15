@@ -1,6 +1,9 @@
+// Copyright 2026 Lucas Saavedra Vaz
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 #pragma once
 
-#include <Limelight.h>
+#include "StreamTypes.hpp"
 #include <nanovg.h>
 
 extern "C" {
@@ -39,18 +42,19 @@ class IVideoRenderer {
     virtual ~IVideoRenderer(){};
     virtual void draw(NVGcontext* vg, int width, int height,
                       AVFrame* frame, int imageFormat) = 0;
+    virtual void cleanup() {}
     virtual VideoRenderStats* video_render_stats() = 0;
 
-    // Default implementations
-    virtual int getDecoderColorspace() {
-        // Rec 601 is default
-        return COLORSPACE_REC_601;
+    // What the host said it encodes (punktfunk_connection_color_info); used when the
+    // bitstream leaves the frame's colour fields unset.
+    void setStreamColor(int colorspace, int color_range) {
+        m_stream_colorspace = colorspace;
+        m_stream_color_range = color_range;
     }
 
-    virtual int getDecoderColorRange() {
-        // Limited is the default
-        return COLOR_RANGE_LIMITED;
-    }
+    virtual int getDecoderColorspace() { return m_stream_colorspace; }
+
+    virtual int getDecoderColorRange() { return m_stream_color_range; }
 
     virtual int getFrameColorspace(const AVFrame* frame) {
         // Prefer the colorspace field on the AVFrame itself
@@ -71,9 +75,12 @@ class IVideoRenderer {
     }
 
     virtual bool isFrameFullRange(const AVFrame* frame) {
-        // This handles the case where the color range is unknown,
-        // so that we use Limited color range which is the default
-        // behavior for Moonlight.
+        if (frame->color_range == AVCOL_RANGE_UNSPECIFIED)
+            return getDecoderColorRange() == COLOR_RANGE_FULL;
         return frame->color_range == AVCOL_RANGE_JPEG;
     }
+
+  protected:
+    int m_stream_colorspace = COLORSPACE_REC_709;
+    int m_stream_color_range = COLOR_RANGE_LIMITED;
 };

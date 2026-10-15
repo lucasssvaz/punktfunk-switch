@@ -1,9 +1,13 @@
+// Copyright 2026 Lucas Saavedra Vaz
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 #if defined(PLATFORM_SWITCH) && defined(BOREALIS_USE_DEKO3D)
 
 #define FF_API_AVPICTURE
 
 #include "DKVideoRenderer.hpp"
 #include "Settings.hpp"
+#include "VideoFit.hpp"
 #include <borealis/platforms/switch/switch_platform.hpp>
 
 #include <libavcodec/avcodec.h>
@@ -168,14 +172,11 @@ namespace
         return viewport;
     }
 
-    void setTransformUvData(Transformation& transform,
-                            const SourceViewport& viewport,
-                            int frameWidth,
-                            int frameHeight) {
-        transform.uv_data[0] = viewport.offsetX / static_cast<float>(frameWidth);
-        transform.uv_data[1] = viewport.offsetY / static_cast<float>(frameHeight);
-        transform.uv_data[2] = static_cast<float>(frameWidth) / viewport.width;
-        transform.uv_data[3] = static_cast<float>(frameHeight) / viewport.height;
+    void setTransformUvData(Transformation& transform, const VideoUv& uv) {
+        transform.uv_data[0] = uv.offset_x;
+        transform.uv_data[1] = uv.offset_y;
+        transform.uv_data[2] = uv.scale_x;
+        transform.uv_data[3] = uv.scale_y;
     }
 
     void populateEasuConstants(EasuConstants& constants,
@@ -284,12 +285,17 @@ namespace
 
 DKVideoRenderer::DKVideoRenderer() {}
 
-DKVideoRenderer::~DKVideoRenderer() {
+void DKVideoRenderer::cleanup() {
     if (vctx != nullptr) {
         queue.waitIdle();
     }
 
     frameMappings.clear();
+    currentMappingIndex = -1;
+}
+
+DKVideoRenderer::~DKVideoRenderer() {
+    cleanup();
 #ifdef SUPPORT_UPSCALING
     releaseUpscalingResources();
     easuUniformBuffer.destroy();
@@ -813,25 +819,29 @@ void DKVideoRenderer::recordStaticCommands(AVFrame* frame) {
     displayTransformState.offset[2] = colorOffset[2];
     displayTransformState.offset[3] = 0.0f;
 
-    const SourceViewport sourceViewport = getSourceViewport(
-        m_frame_width, m_frame_height, m_screen_width, m_screen_height);
-    setTransformUvData(displayTransformState, sourceViewport, m_frame_width,
-                       m_frame_height);
+    const PictureFit pictureFit = Settings::instance().picture_fit();
+    setTransformUvData(displayTransformState,
+                       video_uv(pictureFit, m_screen_width, m_screen_height,
+                                m_frame_width, m_frame_height));
 
     Transformation sourceTransformState = displayTransformState;
-    setTransformUvData(
-        sourceTransformState,
-        SourceViewport{0.0f, 0.0f, static_cast<float>(m_frame_width),
-                       static_cast<float>(m_frame_height)},
-        m_frame_width, m_frame_height);
+    setTransformUvData(sourceTransformState, video_uv(PictureFit::Stretch, 1, 1, 1, 1));
 
+#ifdef SUPPORT_UPSCALING
     if (useUpscaling && easuUniformBuffer) {
+        const SourceViewport sourceViewport =
+            pictureFit == PictureFit::Crop
+                ? getSourceViewport(m_frame_width, m_frame_height, m_screen_width,
+                                    m_screen_height)
+                : SourceViewport{0.0f, 0.0f, static_cast<float>(m_frame_width),
+                                 static_cast<float>(m_frame_height)};
         EasuConstants easuConstants = {};
         populateEasuConstants(easuConstants, sourceViewport, m_frame_width,
                               m_frame_height, m_screen_width, m_screen_height);
         memcpy(easuUniformBuffer.getCpuAddr(), &easuConstants,
                sizeof(easuConstants));
     }
+#endif
 
     dk::RasterizerState rasterizerState;
     dk::DepthStencilState depthStencilState;
@@ -958,9 +968,11 @@ void DKVideoRenderer::updateRenderState(int width, int height, AVFrame* frame) {
     const bool ditheringChanged = m_dithering_requested != requestedDithering;
     const bool upscalingChanged = m_upscaling_requested != requestedUpscaling;
     const bool rcasChanged = m_rcas_requested != requestedRcas;
+    const PictureFit pictureFit = Settings::instance().picture_fit();
+    const bool fitChanged = m_picture_fit != pictureFit;
 
     if (!frameSizeChanged && !screenSizeChanged && !colorChanged &&
-        !ditheringChanged && !upscalingChanged && !rcasChanged) {
+        !ditheringChanged && !upscalingChanged && !rcasChanged && !fitChanged) {
         return;
     }
 
@@ -976,6 +988,7 @@ void DKVideoRenderer::updateRenderState(int width, int height, AVFrame* frame) {
 
     m_screen_width = width;
     m_screen_height = height;
+    m_picture_fit = pictureFit;
     recordStaticCommands(frame);
 }
 
@@ -1100,7 +1113,7 @@ void DKVideoRenderer::draw(NVGcontext* vg, int width, int height, AVFrame* frame
         return;
     }
 
-    uint64_t before_render = LiGetMillis();
+    uint64_t before_render = stream_millis();
 
     if (!m_video_render_stats_progress.rendered_frames) {
         m_video_render_stats_progress.measurement_start_timestamp = before_render;
@@ -1140,7 +1153,7 @@ void DKVideoRenderer::draw(NVGcontext* vg, int width, int height, AVFrame* frame
 #endif
     }
 
-    const uint64_t render_time = LiGetMillis() - before_render;
+    const uint64_t render_time = stream_millis() - before_render;
     frames++;
     timeCount += render_time;
 
@@ -1154,7 +1167,7 @@ void DKVideoRenderer::draw(NVGcontext* vg, int width, int height, AVFrame* frame
     m_video_render_stats_progress.rendered_frames++;
 
     const uint64_t stats_interval_ms = 200;
-    const uint64_t stats_now = LiGetMillis();
+    const uint64_t stats_now = stream_millis();
     if (stats_now - m_video_render_stats_progress.measurement_start_timestamp >=
         stats_interval_ms) {
         m_video_render_stats_cache = m_video_render_stats_progress;

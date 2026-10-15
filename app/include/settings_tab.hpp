@@ -3,8 +3,10 @@
 //  Moonlight
 //
 //  Created by XITRIX on 26.05.2021.
+//  Copyright 2026 Lucas Saavedra Vaz
 //
-
+//  SPDX-License-Identifier: GPL-3.0-or-later
+//
 #pragma once
 
 #include <borealis.hpp>
@@ -25,14 +27,14 @@ class SettingsTab : public brls::Box {
     BRLS_BIND(BooleanSliderCell, rcas, "rcas");
     BRLS_BIND(brls::SelectorCell, fps, "fps");
     BRLS_BIND(brls::SelectorCell, codec, "codec");
-    BRLS_BIND(brls::BooleanCell, requestHdr, "request_hdr");
+    BRLS_BIND(brls::SelectorCell, videoFit, "video_fit");
     BRLS_BIND(brls::SelectorCell, decoder, "decoder");
-    BRLS_BIND(brls::BooleanCell, hwDecoding, "use_hw_decoding");
     BRLS_BIND(brls::Header, header, "header");
     BRLS_BIND(brls::Slider, slider, "slider");
-    BRLS_BIND(brls::SelectorCell, audioBackend, "audio_backend");
-    BRLS_BIND(brls::BooleanCell, optimal, "optimal");
-    BRLS_BIND(brls::BooleanCell, pcAudio, "pcAudio");
+    BRLS_BIND(brls::BooleanCell, keepHostAudio, "keep_host_audio");
+    BRLS_BIND(brls::SelectorCell, statsTier, "stats_tier");
+    BRLS_BIND(brls::SelectorCell, gamepadType, "gamepad_type");
+    BRLS_BIND(brls::BooleanCell, sendMotion, "send_motion");
     BRLS_BIND(brls::BooleanCell, swapUi, "swap_ui");
     BRLS_BIND(brls::DetailCell, swapGame, "swap_game");
     BRLS_BIND(brls::DetailCell, deadzoneStickLeft, "dead_zone_stick_left");
@@ -50,7 +52,7 @@ class SettingsTab : public brls::Box {
     BRLS_BIND(brls::SelectorCell, keyboardType, "keyboard_type");
     BRLS_BIND(brls::SelectorCell, keyboardFingers, "keyboard_fingers");
     BRLS_BIND(brls::BooleanCell, volumeAmplification, "volume_amplification");
-    BRLS_BIND(brls::BooleanCell, touchscreenMouseMode, "touchscreen_mouse_mode");
+    BRLS_BIND(brls::SelectorCell, touchMode, "touch_mode");
     BRLS_BIND(brls::BooleanCell, swapMouseKeys, "swap_mouse_keys");
     BRLS_BIND(brls::BooleanCell, swapMouseScroll, "swap_mouse_scroll");
     BRLS_BIND(brls::Header, mouseSpeedHeader, "mouse_speed_header");

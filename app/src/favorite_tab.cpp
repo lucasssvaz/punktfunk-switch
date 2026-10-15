@@ -3,8 +3,10 @@
 //  Moonlight
 //
 //  Created by Даниил Виноградов on 24.09.2021.
+//  Copyright 2026 Lucas Saavedra Vaz
 //
-
+//  SPDX-License-Identifier: GPL-3.0-or-later
+//
 #include "favorite_tab.hpp"
 #include "app_cell.hpp"
 #include "main_tabs_view.hpp"
@@ -38,7 +40,7 @@ void FavoriteTab::updateAppList() {
             continue;
 
         auto* header = new Header();
-        header->setTitle(host.hostname);
+        header->setTitle(host.display_name());
         header->setLineBottom(0);
 
         if (!container->getChildren().empty())
@@ -49,17 +51,16 @@ void FavoriteTab::updateAppList() {
         auto* gridView = new GridView(5);
 
         for (const App& app : host.favorites) {
-            AppInfo info{app.name, app.app_id};
-            auto* cell = new AppCell(host, info, 0);
+            LibraryEntry entry;
+            entry.id = app.app_id;
+            entry.title = app.name;
+            auto* cell = new AppCell(host, entry, "");
             gridView->addView(cell);
 
-#if defined(PLATFORM_SWITCH) || defined(PLATFORM_IOS)
+#if defined(PLATFORM_SWITCH)
             cell->registerAction(
                 "forwarder/make"_i18n, BUTTON_X,
                 [host, app](View* view) {
-#ifdef PLATFORM_IOS
-                    makeForwarder(host, app, false);
-#else
                     const int rc = makeForwarder(host, app, false);
                     const std::string message =
                         rc == EXIT_SUCCESS
@@ -69,7 +70,6 @@ void FavoriteTab::updateAppList() {
                     auto dialog = new Dialog(message);
                     dialog->addButton("common/cancel"_i18n, [](){});
                     dialog->open();
-#endif
                     return true;
             });
 #endif

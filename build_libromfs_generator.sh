@@ -1,3 +1,6 @@
+# Copyright 2026 Lucas Saavedra Vaz
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 set -e
 
 # ========  手动构建 libromfs-generator ========

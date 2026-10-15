@@ -1,0 +1,23 @@
+# Copyright 2026 Lucas Saavedra Vaz
+# SPDX-License-Identifier: Apache-2.0
+
+[build]
+target = "targets/aarch64-nintendo-switch-libnx.json"
+
+[unstable]
+build-std = ["std", "panic_abort"]
+build-std-features = ["compiler-builtins-mem"]
+json-target-spec = true
+
+[target.aarch64-nintendo-switch-libnx]
+linker = "aarch64-none-elf-gcc"
+rustflags = ["-C", "target-cpu=cortex-a57"]
+
+[env]
+# Horizon traps `cntvct_el0`; aws-lc's jitter entropy uses that MRS and data-aborts.
+AWS_LC_SYS_NO_JITTER_ENTROPY = "1"
+CC_aarch64_nintendo_switch_libnx = "aarch64-none-elf-gcc"
+CXX_aarch64_nintendo_switch_libnx = "aarch64-none-elf-g++"
+AR_aarch64_nintendo_switch_libnx = "aarch64-none-elf-gcc-ar"
+CFLAGS_aarch64_nintendo_switch_libnx = "-march=armv8-a+crc+crypto -mtune=cortex-a57 -mtp=soft -fPIE -ffunction-sections -fdata-sections -D__SWITCH__ -D_DEFAULT_SOURCE -I/opt/devkitpro/libnx/include -I/opt/devkitpro/portlibs/switch/include -I/src/punktfunk-rs/shims/include"
+CXXFLAGS_aarch64_nintendo_switch_libnx = "-march=armv8-a+crc+crypto -mtune=cortex-a57 -mtp=soft -fPIE -ffunction-sections -fdata-sections -D__SWITCH__ -D_DEFAULT_SOURCE -I/opt/devkitpro/libnx/include -I/opt/devkitpro/portlibs/switch/include -I/src/punktfunk-rs/shims/include"

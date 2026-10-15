@@ -1,7 +1,11 @@
+// Copyright 2026 Lucas Saavedra Vaz
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 #if defined(__SWITCH__) && defined(BOREALIS_USE_DEKO3D)
 
 #pragma once
 #include "IVideoRenderer.hpp"
+#include "Settings.hpp"
 #include <deko3d.hpp>
 
 #include <glm/mat4x4.hpp>
@@ -19,6 +23,7 @@ class DKVideoRenderer : public IVideoRenderer {
     ~DKVideoRenderer();
 
     void draw(NVGcontext* vg, int width, int height, AVFrame* frame, int imageFormat) override;
+    void cleanup() override;
 
     VideoRenderStats* video_render_stats() override;
 
@@ -46,6 +51,7 @@ class DKVideoRenderer : public IVideoRenderer {
     int m_frame_height = 0;
     int m_screen_width = 0;
     int m_screen_height = 0;
+    PictureFit m_picture_fit = PictureFit::Fit;
 
     brls::SwitchVideoContext* vctx = nullptr;
     dk::Device dev;

@@ -1,8 +1,0 @@
-[Desktop Entry]
-Type=Application
-Name=Add Moonlight-Switch to Steam
-Comment=Add Moonlight-Switch to the Steam library without using the file picker
-Icon=steam
-Terminal=false
-StartupNotify=false
-Exec=/bin/sh -c "exec \"\$(dirname \"\$1\")/AddToSteam.sh\"" sh %k

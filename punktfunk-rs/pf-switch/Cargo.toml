@@ -1,0 +1,20 @@
+# Copyright 2026 Lucas Saavedra Vaz
+# SPDX-License-Identifier: Apache-2.0
+
+[package]
+name = "pf-switch"
+version = "0.1.0"
+edition = "2021"
+authors = ["Lucas Saavedra Vaz"]
+license = "Apache-2.0"
+description = "punktfunk's C ABI (punktfunk-ffi, QUIC connection API) plus a pinned mTLS management-API client, as one static library for the Nintendo Switch client"
+publish = false
+
+[lib]
+crate-type = ["staticlib"]
+
+[dependencies]
+punktfunk-ffi = { path = "../../extern/punktfunk/crates/punktfunk-ffi", features = ["quic"] }
+punktfunk-core = { path = "../../extern/punktfunk/crates/punktfunk-core", features = ["ureq-tls"] }
+rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs", "prefer-post-quantum", "std"] }
+ureq = { version = "3", default-features = false, features = ["rustls-no-provider", "rustls-webpki-roots", "gzip"] }

@@ -3,8 +3,10 @@
 //  Moonlight
 //
 //  Created by XITRIX on 26.05.2021.
+//  Copyright 2026 Lucas Saavedra Vaz
 //
-
+//  SPDX-License-Identifier: GPL-3.0-or-later
+//
 #include "app_list_view.hpp"
 #include "helper.hpp"
 #include "main_tabs_view.hpp"
@@ -13,8 +15,8 @@ AppListView::AppListView(const Host& host) : host(host) {
     this->inflateFromXMLRes("xml/views/app_list_view.xml");
 
     auto* label = new brls::Label();
-    label->setText(brls::Hint::getKeyIcon(ControllerButton::BUTTON_BACK) +
-                   "  " + "app_list/terminate_current_app"_i18n);
+    label->setText(brls::Hint::getKeyIcon(ControllerButton::BUTTON_BACK) + "  " +
+                   "app_list/terminate_current_app"_i18n);
     label->setFontSize(24);
     label->setMargins(4, 16, 4, 16);
 
@@ -33,33 +35,26 @@ AppListView::AppListView(const Host& host) : host(host) {
     container->addView(gridView);
     loader = new LoadingOverlay(this);
 
-    auto closeCurrentAction = [this, host](View* view) {
-        if (currentApp.has_value()) {
+    auto closeCurrentAction = [this](View* view) {
+        if (currentApp.has_value() && currentApp->endable)
             this->terninateApp();
-        }
         return true;
     };
 
     hintView->registerClickAction(closeCurrentAction);
-    hintView->registerAction("", brls::ControllerButton::BUTTON_BACK,
-                             closeCurrentAction, true);
-    registerAction("", brls::ControllerButton::BUTTON_BACK, closeCurrentAction,
-                   true);
+    hintView->registerAction("", brls::ControllerButton::BUTTON_BACK, closeCurrentAction, true);
+    registerAction("", brls::ControllerButton::BUTTON_BACK, closeCurrentAction, true);
 
-    // #ifdef __SWITCH__
-    //     registerAction("", brls::ControllerButton::BUTTON_LB, [](View* view)
-    //     {
-    //         appletPerformSystemButtonPressingIfInFocus(AppletSystemButtonType_HomeButtonLongPressing);
-    //         return true;
-    //     }, true);
-    // #endif
-
-    registerAction("app_list/reload_app_list"_i18n, BUTTON_X,
-                   [this](View* view) {
-                       this->updateAppList();
-                       return true;
-                   });
+    registerAction("app_list/reload_app_list"_i18n, BUTTON_X, [this](View* view) {
+        this->updateAppList();
+        return true;
+    });
     blockInput(true);
+}
+
+AppListView::~AppListView() {
+    blockInput(false);
+    PunktfunkClient::instance().cancel_artwork();
 }
 
 void AppListView::blockInput(bool block) {
@@ -76,14 +71,13 @@ void AppListView::terninateApp() {
     if (loading)
         return;
 
-    auto* dialog =
-        new Dialog("app_list/terminate_prefix"_i18n + currentApp->name +
-                   "app_list/terminate_postfix"_i18n);
+    auto* dialog = new Dialog("app_list/terminate_prefix"_i18n + currentApp->title +
+                              "app_list/terminate_postfix"_i18n);
 
     dialog->addButton("common/cancel"_i18n, [] {});
 
     dialog->addButton("app_list/terminate"_i18n, [this] {
-        if (loading)
+        if (loading || !currentApp.has_value())
             return;
 
         loading = true;
@@ -93,15 +87,18 @@ void AppListView::terninateApp() {
         blockInput(true);
 
         ASYNC_RETAIN
-        GameStreamClient::instance().quit(
-            host, [ASYNC_TOKEN](const GSResult<bool>& result) {
+        PunktfunkClient::instance().end_game(
+            host, currentApp->app_id, currentApp->title, [ASYNC_TOKEN](const PFResult<std::string>& result) {
                 ASYNC_RELEASE
 
                 loading = false;
                 loader->setHidden(true);
+                blockInput(false);
 
-                if (!result.isSuccess())
-                    showError(result.error(), [this] {});
+                if (result.isSuccess())
+                    Application::notify(result.value());
+                else
+                    showError(result.error());
 
                 updateAppList();
             });
@@ -116,6 +113,7 @@ void AppListView::updateAppList() {
 
     loading = true;
 
+    PunktfunkClient::instance().cancel_artwork();
     gridView->clearViews();
     Application::giveFocus(this);
     loader->setHidden(false);
@@ -123,74 +121,71 @@ void AppListView::updateAppList() {
     hintView->setVisibility(Visibility::GONE);
     blockInput(true);
 
-    getAppletFrameItem()->title = host.hostname;
+    getAppletFrameItem()->title = host.display_name();
     updateAppletFrameItem();
 
     ASYNC_RETAIN
-    GameStreamClient::instance().connect(
-        host, [ASYNC_TOKEN](const GSResult<SERVER_DATA>& result) {
+    PunktfunkClient::instance().status(host, [ASYNC_TOKEN](const PFResult<HostStatus>& status) {
+        ASYNC_RELEASE
+
+        std::string currentGame;
+        if (status.isSuccess() && !status.value().games.empty()) {
+            setCurrentApp(status.value().games.front());
+            currentGame = status.value().games.front().app_id;
+        }
+
+        ASYNC_RETAIN
+        PunktfunkClient::instance().library(host, [ASYNC_TOKEN, currentGame](const PFResult<Library>& result) {
             ASYNC_RELEASE
 
+            loading = false;
+            loader->setHidden(true);
+            blockInput(false);
+
             if (result.isSuccess()) {
-                int currentGame = result.value().currentGame;
-
-                ASYNC_RETAIN
-                GameStreamClient::instance().applist(
-                    host,
-                    [ASYNC_TOKEN, currentGame](const GSResult<AppInfoList>& result) {
-                        ASYNC_RELEASE
-
-                        loading = false;
-                        loader->setHidden(true);
-                        blockInput(false);
-
-                        if (result.isSuccess()) {
-                            AppInfoList sortedApps = result.value();
-                            std::sort(
-                                sortedApps.begin(), sortedApps.end(),
-                                [this, currentGame](const AppInfo& l, const AppInfo& r) {
-                                    int lScore = 0;
-                                    int rScore = 0;
-
-                                    if (l.app_id == currentGame) lScore+=2;
-                                    if (Settings::instance().is_favorite(this->host, l.app_id)) lScore+=1;
-
-                                    if (r.app_id == currentGame) rScore+=2;
-                                    if (Settings::instance().is_favorite(this->host, r.app_id)) rScore+=1;
-
-                                    return lScore > rScore;
-                                });
-
-                            for (const AppInfo& app : sortedApps) {
-                                if (app.app_id == currentGame)
-                                    setCurrentApp(app);
-
-                                auto* cell =
-                                    new AppCell(host, app, currentGame);
-                                cell->setFavorite(
-                                    Settings::instance().is_favorite(
-                                        host, app.app_id));
-                                gridView->addView(cell);
-                                this->updateFavoriteAction(cell, host, app);
-                            }
-                            Application::giveFocus(this);
-                        } else {
-                            showError(result.error(),
-                                      [this] { this->dismiss(); });
-                        }
-                    });
+                showLibrary(result.value(), currentGame);
             } else {
-                blockInput(false);
-                showError(result.error(), [this] { this->dismiss(); });
+                // The desktop session works without the management API.
+                showLibrary({}, currentGame);
+                Application::notify("app_list/library_error"_i18n + ": " + result.error());
             }
         });
+    });
 }
 
-void AppListView::setCurrentApp(const AppInfo& app) {
+void AppListView::showLibrary(const Library& library, const std::string& currentGame) {
+    Library sortedApps = library;
+    auto score = [this, &currentGame](const LibraryEntry& app) {
+        int value = 0;
+        if (!currentGame.empty() && app.id == currentGame)
+            value += 2;
+        if (Settings::instance().is_favorite(this->host, app.id))
+            value += 1;
+        return value;
+    };
+    std::stable_sort(sortedApps.begin(), sortedApps.end(),
+                     [&score](const LibraryEntry& l, const LibraryEntry& r) { return score(l) > score(r); });
+
+    LibraryEntry desktop;
+    desktop.title = "app_list/desktop"_i18n;
+    sortedApps.insert(sortedApps.begin(), desktop);
+
+    for (const LibraryEntry& app : sortedApps) {
+        auto* cell = new AppCell(host, app, currentGame);
+        gridView->addView(cell);
+        if (!app.id.empty()) {
+            cell->setFavorite(Settings::instance().is_favorite(host, app.id));
+            this->updateFavoriteAction(cell, host, app);
+        }
+    }
+    Application::giveFocus(this);
+}
+
+void AppListView::setCurrentApp(const RunningGame& app) {
     this->currentApp = app;
-    hintView->setVisibility(Visibility::VISIBLE);
+    hintView->setVisibility(app.endable ? Visibility::VISIBLE : Visibility::GONE);
     getAppletFrameItem()->title =
-        host.hostname + " - " + "app_list/running"_i18n + " " + app.name;
+        host.display_name() + " - " + "app_list/running"_i18n + " " + app.title;
     updateAppletFrameItem();
 }
 
@@ -206,19 +201,17 @@ void AppListView::onLayout() {
         loader->layout();
 }
 
-void AppListView::updateFavoriteAction(AppCell* cell, Host host, const AppInfo& app) {
-    bool isFavorite = Settings::instance().is_favorite(host, app.app_id);
+void AppListView::updateFavoriteAction(AppCell* cell, Host host, const LibraryEntry& app) {
+    bool isFavorite = Settings::instance().is_favorite(host, app.id);
     cell->registerAction(
         isFavorite ? "app_list/unstar"_i18n : "app_list/star"_i18n, BUTTON_Y,
         [this, cell, host, app](View* view) {
-            bool isFavorite =
-                Settings::instance().is_favorite(host, app.app_id);
+            bool isFavorite = Settings::instance().is_favorite(host, app.id);
             cell->setFavorite(!isFavorite);
             if (isFavorite) {
-                Settings::instance().remove_favorite(host, app.app_id);
+                Settings::instance().remove_favorite(host, app.id);
             } else {
-                App thisApp{app.name, app.app_id};
-                Settings::instance().add_favorite(host, thisApp);
+                Settings::instance().add_favorite(host, App{app.title, app.id});
             }
             MainTabs::getInstanse()->getFavoriteTab()->setRefreshNeeded();
             this->updateFavoriteAction(cell, host, app);

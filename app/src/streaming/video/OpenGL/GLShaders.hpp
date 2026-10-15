@@ -1,3 +1,6 @@
+// Copyright 2026 Lucas Saavedra Vaz
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 static const char* vertex_shader_string_core = R"glsl(
 #version 140
 in vec2 position;
@@ -20,6 +23,10 @@ out vec4 FragColor;
 
 void main() {
     vec2 uv = (tex_position - uv_data.xy) * uv_data.zw;
+    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
+        FragColor = vec4(0.0, 0.0, 0.0, 1.0);
+        return;
+    }
     vec3 YCbCr = vec3(texture(plane0, uv).r, texture(plane1, uv).r, texture(plane1, uv).g) - offset;
     FragColor = vec4(clamp(yuvmat * YCbCr, 0.0, 1.0), 1.0);
 }
@@ -38,6 +45,10 @@ out vec4 FragColor;
 
 void main() {
     vec2 uv = (tex_position - uv_data.xy) * uv_data.zw;
+    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
+        FragColor = vec4(0.0, 0.0, 0.0, 1.0);
+        return;
+    }
     vec3 YCbCr = vec3(texture(plane0, uv).r, texture(plane1, uv).r, texture(plane2, uv).r) - offset;
     FragColor = vec4(clamp(yuvmat * YCbCr, 0.0, 1.0), 1.0);
 }
@@ -64,6 +75,10 @@ varying mediump vec2 tex_position;
 
 void main() {
     vec2 uv = (tex_position - uv_data.xy) * uv_data.zw;
+    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
+        gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
+        return;
+    }
     vec3 YCbCr = vec3(texture2D(plane0, uv).r,
                       texture2D(plane1, uv).r,
                       texture2D(plane1, uv).a) - offset;
@@ -83,6 +98,10 @@ varying mediump vec2 tex_position;
 
 void main() {
     vec2 uv = (tex_position - uv_data.xy) * uv_data.zw;
+    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
+        gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
+        return;
+    }
     vec3 YCbCr = vec3(texture2D(plane0, uv).r,
                       texture2D(plane1, uv).r,
                       texture2D(plane2, uv).r) - offset;
@@ -111,6 +130,10 @@ out mediump vec4 fragmentColor;
 
 void main() {
     highp vec2 uv = (tex_position - uv_data.xy) * uv_data.zw;
+    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
+        fragmentColor = vec4(0.0, 0.0, 0.0, 1.0);
+        return;
+    }
     highp vec3 YCbCr = vec3(texture(plane0, uv).r, texture(plane1, uv).r, texture(plane1, uv).g) - offset;
     fragmentColor = vec4(clamp(yuvmat * YCbCr, 0.0, 1.0), 1.0);
 }
@@ -128,6 +151,10 @@ out mediump vec4 fragmentColor;
 
 void main() {
     highp vec2 uv = (tex_position - uv_data.xy) * uv_data.zw;
+    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
+        fragmentColor = vec4(0.0, 0.0, 0.0, 1.0);
+        return;
+    }
     highp vec3 YCbCr = vec3(texture(plane0, uv).r, texture(plane1, uv).r, texture(plane2, uv).r) - offset;
     fragmentColor = vec4(clamp(yuvmat * YCbCr, 0.0, 1.0), 1.0);
 }

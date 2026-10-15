@@ -1,6 +1,10 @@
+// Copyright 2026 Lucas Saavedra Vaz
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 #ifdef USE_GL_RENDERER
 
 #include "IVideoRenderer.hpp"
+#include "Settings.hpp"
 #if defined(__LIBRETRO__)
 #include "glsym.h"
 #elif defined(__PSV__)
@@ -45,6 +49,7 @@ class GLVideoRenderer : public IVideoRenderer {
     int m_frame_height = 0;
     int m_screen_width = 0;
     int m_screen_height = 0;
+    PictureFit m_picture_fit = PictureFit::Fit;
     int m_yuvmat_location;
     int m_offset_location;
     int m_uv_data_location;

@@ -1,27 +1,10 @@
 {
-    "about": {
-        "about": "Moonlight-Switch是Nintendo Switch平台的一个基于Moonlight-Common-C的第三方游戏串流客户端",
-        "link_gbatemp": "GbaTemp页面",
-        "link_github": "GitHub页面",
-        "link_patreon": "Patreon页面",
-        "links": "链接",
-        "thanks": "特别感谢",
-        "thanks_1": " Rock88和他的Moonlight-NX，很多代码在这个应用程序中被重用",
-        "thanks_2": " Natinusala，创造了Borealis",
-        "thanks_3": " Moonlight团队，没有他们本软件不可能出现",
-        "thanks_4": " Cameron Gutman，帮助解决了LibNX的问题",
-        "thanks_5": " 参与应用程序开发的每个人",
-        "thanks_6": " 你，感谢使用我的自制软件！",
-        "title": "关于",
-        "version": "Moonlight-Switch v{} by XITRIX"
-    },
     "add_host": {
         "connect": "连接",
         "host_ip": "主机IP",
         "manual": "手动",
         "pair_postfix": " 在计算机设备上输入",
         "pair_prefix": "配对\n\n在主机设备上输入 ",
-        "paired_error": "已配对\n配置已经更新",
         "search": "搜索",
         "search_error": "不可使用搜索",
         "search_refresh": "刷新",
@@ -32,10 +15,7 @@
         "run_current": "启动当前应用程序",
         "running": "启动中",
         "star": "收藏",
-        "terminate": "终止",
-        "terminate_current_app": "终止当前应用程序",
         "terminate_postfix": "\n\n所有未保存的进度都有可能丢失",
-        "terminate_prefix": "终止 ",
         "unstar": "取消收藏"
     },
     "common": {
@@ -146,9 +126,7 @@
         "overlay_setup_message": "按下想使用的按键来打开叠加层：\n\n",
         "overlay_time": "按住按键几秒内打开叠加层",
         "overlay_zero_time": "0（立即）",
-        "paop": "串流时在主机上也同时播放音频",
         "quality": "串流质量 (更高的质量需要CPU超频)",
-        "request_hdr": "请求 HDR 视频",
         "resolution": "分辨率",
         "resolution_native": "原生",
         "resolution_scale": "缩放",
@@ -167,11 +145,27 @@
         "touchscreen_mouse_mode": "触摸屏模式",
         "use_hw_decoding": "启用硬件加速",
         "use_system_button": "使用系统按键",
-        "usops": "使用串流优化设置",
         "video_bitrate": "视频码率",
         "video_codec": "视频解码器",
+        "codec_auto": "自动",
+        "video_fit": "画面适配",
+        "video_fit_fit": "适应（黑边）",
+        "video_fit_crop": "裁剪",
+        "video_fit_stretch": "拉伸",
+        "touch_mode": "触摸输入",
+        "touch_mode_trackpad": "触控板",
+        "touch_mode_pointer": "直接指针",
+        "touch_mode_touch": "触摸直通",
+        "touch_mode_off": "关闭",
         "volume_amplification": "允许放大音量",
-        "zero_threads": "0（不使用线程）"
+        "zero_threads": "0（不使用线程）",
+        "keep_host_audio": "主机继续播放音频",
+        "stats_tier": "统计叠加层详细程度",
+        "stats_tier_basic": "基本",
+        "stats_tier_standard": "标准",
+        "stats_tier_detailed": "详细",
+        "gamepad_type": "模拟手柄",
+        "send_motion": "发送体感（陀螺仪）"
     },
     "streaming": {
         "connection": "连接选项",
@@ -194,5 +188,5 @@
         "favorites": "最爱",
         "settings": "设置"
     },
-    "title": "Moonlight"
+    "title": "PFSW"
 }

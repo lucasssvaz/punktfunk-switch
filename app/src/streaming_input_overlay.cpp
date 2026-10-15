@@ -3,10 +3,12 @@
 //  Moonlight
 //
 //  Created by Даниил Виноградов on 25.08.2021.
+//  Copyright 2026 Lucas Saavedra Vaz
 //
-
+//  SPDX-License-Identifier: GPL-3.0-or-later
+//
 #include "streaming_input_overlay.hpp"
-#include <Limelight.h>
+#include "PunktfunkInput.hpp"
 
 using namespace brls;
 
@@ -61,9 +63,8 @@ void StreamingInputOverlay::draw(NVGcontext* vg, float x, float y, float width,
         for (int i = 0; i < _VK_KEY_MAX; i++) {
             if (keyboardState.keys[i] != oldKeyboardState.keys[i]) {
                 oldKeyboardState.keys[i] = keyboardState.keys[i];
-                LiSendKeyboardEvent(
-                    keyboard->getKeyCode((KeyboardKeys)i),
-                    keyboardState.keys[i] ? KEY_ACTION_DOWN : KEY_ACTION_UP, 0);
+                pf_input::key((uint16_t)keyboard->getKeyCode((KeyboardKeys)i),
+                              keyboardState.keys[i]);
             }
         }
     }
@@ -97,7 +98,7 @@ void StreamingInputOverlay::draw(NVGcontext* vg, float x, float y, float width,
                 Settings::instance().get_mouse_speed_multiplier() / 100.f *
                     1.5f +
                 0.5f;
-            LiSendMouseMoveEvent(x * multiplier, y * multiplier);
+            pf_input::mouse_move((int)(x * multiplier), (int)(y * multiplier));
         }
 
         static bool old_l_pressed;
@@ -115,20 +116,18 @@ void StreamingInputOverlay::draw(NVGcontext* vg, float x, float y, float width,
         if (l_pressed != old_l_pressed) {
             old_l_pressed = l_pressed;
             auto lb = Settings::instance().swap_mouse_keys()
-                          ? BUTTON_MOUSE_RIGHT
-                          : BUTTON_MOUSE_LEFT;
-            LiSendMouseButtonEvent(
-                l_pressed ? BUTTON_ACTION_PRESS : BUTTON_ACTION_RELEASE, lb);
+                          ? pf_input::MOUSE_RIGHT
+                          : pf_input::MOUSE_LEFT;
+            pf_input::mouse_button(lb, l_pressed);
         }
 
         // Right mouse button
         if (r_pressed != old_r_pressed) {
             old_r_pressed = r_pressed;
             auto rb = Settings::instance().swap_mouse_keys()
-                          ? BUTTON_MOUSE_LEFT
-                          : BUTTON_MOUSE_RIGHT;
-            LiSendMouseButtonEvent(
-                r_pressed ? BUTTON_ACTION_PRESS : BUTTON_ACTION_RELEASE, rb);
+                          ? pf_input::MOUSE_LEFT
+                          : pf_input::MOUSE_RIGHT;
+            pf_input::mouse_button(rb, r_pressed);
         }
 
         // Scroll
@@ -146,7 +145,7 @@ void StreamingInputOverlay::draw(NVGcontext* vg, float x, float y, float width,
         if (scroll_y != 0 && duration > 550 - abs(scroll_y) * 500) {
             timeStamp = timeNow;
             brls::Logger::info("Scroll sended: {}", scroll_y);
-            LiSendScrollEvent(scroll_y > 0 ? 1 : -1);
+            pf_input::scroll(scroll_y > 0 ? pf_input::WHEEL_DELTA : -pf_input::WHEEL_DELTA);
         }
     }
 }
@@ -224,9 +223,9 @@ void StreamingInputOverlay::populateHintWithDefaultItems() {
 }
 
 void sendClick(char key) {
-    LiSendKeyboardEvent(key, KEY_ACTION_DOWN, 0);
+    pf_input::key((uint8_t)key, true);
     brls::delay(100, [key]() {
-    LiSendKeyboardEvent(key, KEY_ACTION_UP, 0);
+        pf_input::key((uint8_t)key, false);
     });
 }
 

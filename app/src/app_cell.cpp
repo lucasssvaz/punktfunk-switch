@@ -3,29 +3,32 @@
 //  Moonlight
 //
 //  Created by Даниил Виноградов on 03.06.2021.
+//  Copyright 2026 Lucas Saavedra Vaz
 //
-
+//  SPDX-License-Identifier: GPL-3.0-or-later
+//
 #include "app_cell.hpp"
 #include "BoxArtManager.hpp"
 #include "Settings.hpp"
 #include "streaming_view.hpp"
 
-AppCell::AppCell(const Host& host, const AppInfo& app, int currentApp) {
+AppCell::AppCell(const Host& host, const LibraryEntry& app, const std::string& currentApp) {
     this->inflateFromXMLRes("xml/cells/app_cell.xml");
     this->setFavorite(false);
 
-    title->setText(app.name);
+    title->setText(app.title);
     title->setTextColor(nvgRGB(255, 255, 255));
 
-    bool isUnactive = currentApp != 0 && currentApp != app.app_id;
-    unactiveLayer->setVisibility(isUnactive ? Visibility::VISIBLE
-                                            : Visibility::GONE);
-    currentAppImage->setVisibility(
-        currentApp == app.app_id ? Visibility::VISIBLE : Visibility::GONE);
+    // The host runs one game at a time; anything else must wait until it ends.
+    const bool isCurrent = !currentApp.empty() && currentApp == app.id;
+    const bool isUnactive = !currentApp.empty() && !isCurrent && !app.id.empty();
+    unactiveLayer->setVisibility(isUnactive ? Visibility::VISIBLE : Visibility::GONE);
+    currentAppImage->setVisibility(isCurrent ? Visibility::VISIBLE : Visibility::GONE);
 
+    App launch{app.title, app.id};
     this->addGestureRecognizer(new TapGestureRecognizer(this));
-    this->registerClickAction([host, app](View* view) {
-        auto* frame = new AppletFrame(new StreamingView(host, app));
+    this->registerClickAction([host, launch](View* view) {
+        auto* frame = new AppletFrame(new StreamingView(host, launch));
         frame->setBackground(ViewBackground::NONE);
         frame->setHeaderVisibility(brls::Visibility::GONE);
         frame->setFooterVisibility(brls::Visibility::GONE);
@@ -34,26 +37,21 @@ AppCell::AppCell(const Host& host, const AppInfo& app, int currentApp) {
     });
     this->setActionAvailable(BUTTON_A, !isUnactive);
 
-    if (BoxArtManager::instance().has_boxart(app.app_id))
-        image->setImageFromFile(
-            BoxArtManager::get_texture_path(app.app_id));
-    else {
+    if (app.id.empty()) {
+        image->setImageFromRes("img/punktfunk_desktop.png");
+    } else if (BoxArtManager::instance().has_boxart(host, app.id)) {
+        image->setImageFromFile(BoxArtManager::get_texture_path(host, app.id));
+    } else if (!app.art.empty()) {
         ASYNC_RETAIN
-        GameStreamClient::instance().app_boxart(
-            host, app.app_id, [ASYNC_TOKEN, host, app](auto result) {
-                ASYNC_RELEASE
+        PunktfunkClient::instance().artwork(host, app, [ASYNC_TOKEN](const PFResult<std::string>& result) {
+            ASYNC_RELEASE
 
-                if (result.isSuccess()) {
-                    BoxArtManager::instance().set_data(result.value(),
-                                                       app.app_id);
-                    image->setImageFromFile(
-                        BoxArtManager::get_texture_path(app.app_id));
-                }
-            });
+            if (result.isSuccess())
+                image->setImageFromFile(result.value());
+        });
     }
 }
 
 void AppCell::setFavorite(bool favorite) {
-    favoriteAppImage->setVisibility(favorite ? Visibility::VISIBLE
-                                             : Visibility::GONE);
+    favoriteAppImage->setVisibility(favorite ? Visibility::VISIBLE : Visibility::GONE);
 }

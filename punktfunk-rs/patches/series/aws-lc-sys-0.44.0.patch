@@ -1,0 +1,39 @@
+--- a/aws-lc/crypto/rand_extra/internal.h
++++ b/aws-lc/crypto/rand_extra/internal.h
+@@ -13,7 +13,8 @@
+ #elif defined(OPENSSL_MACOS) || defined(OPENSSL_OPENBSD) || \
+     defined(OPENSSL_FREEBSD)  || defined(OPENSSL_NETBSD) || \
+     defined(OPENSSL_SOLARIS) || defined(OPENSSL_WASM) || \
+-    (defined(OPENSSL_LINUX) && !defined(HAVE_LINUX_RANDOM_H))
++    (defined(OPENSSL_LINUX) && !defined(HAVE_LINUX_RANDOM_H)) || \
++    defined(__SWITCH__)
+ #define OPENSSL_RAND_GETENTROPY
+ // OPENSSL_APPLE is always defined when OPENSSL_MACOS is defined, so this
+ // branch must come after the OPENSSL_MACOS branch above.
+--- a/aws-lc/include/openssl/target.h
++++ b/aws-lc/include/openssl/target.h
+@@ -285,4 +285,10 @@
+ #  define MY_ASSEMBLER_IS_TOO_OLD_FOR_512AVX
+ #endif
+ 
++// Nintendo Switch (Horizon): no getauxval/sysctl and EL0 cannot read the ID registers, so the
++// capabilities come from -march (Cortex-A57: NEON, AES, PMULL, SHA-1, SHA-256).
++#if defined(__SWITCH__) && defined(OPENSSL_AARCH64) && !defined(OPENSSL_STATIC_ARMCAP)
++#define OPENSSL_STATIC_ARMCAP
++#endif
++
+ #endif  // OPENSSL_HEADER_TARGET_H
+--- a/builder/main.rs
++++ b/builder/main.rs
+@@ -1106,6 +1106,11 @@ fn should_build_jitter_entropy() -> bool {
+         if target_arch().starts_with("wasm") {
+             return false;
+         }
++        // Horizon: jitterentropy's aarch64 timer is `mrs cntvct_el0`, which EL0 cannot
++        // read (Data Abort). libnx's tick is cntpct_el0. RAND then uses getentropy().
++        if target_os() == "horizon" {
++            return false;
++        }
+         // The current FIPS branch does not include jitter entropy.
+         if is_fips_build() {
+             return true;

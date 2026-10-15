@@ -1,0 +1,475 @@
+diff --git a/crates/punktfunk-core/src/client/mod.rs b/crates/punktfunk-core/src/client/mod.rs
+index abd0d054e..fb13108cd 100644
+--- a/crates/punktfunk-core/src/client/mod.rs
++++ b/crates/punktfunk-core/src/client/mod.rs
+@@ -722,16 +722,24 @@ impl NativeClient {
+             advertised_client_caps(params.client_caps, params.audio_rate_hz, params.audio_bits);
+         let shared_w = shared.clone();
+         let ctrl_tx_pump = ctrl_tx.clone(); // pump sends adaptive-FEC LossReports
+-        let worker = std::thread::Builder::new()
+-            .name("punktfunk-client".into())
++        let mut worker = std::thread::Builder::new().name("punktfunk-client".into());
++        #[cfg(target_os = "horizon")]
++        {
++            worker = worker.stack_size(2 * 1024 * 1024);
++        }
++        let worker = worker
+             .spawn(move || {
+                 pin_thread_user_interactive(); // runtime + handshake thread
+-                let rt = match tokio::runtime::Builder::new_multi_thread()
+-                    .worker_threads(2)
++                let mut rt = tokio::runtime::Builder::new_multi_thread();
++                rt.worker_threads(2)
+                     // Workers + spawn_blocking pump match consumer QoS — no priority inversion.
+                     .on_thread_start(pin_thread_user_interactive)
+-                    .enable_all()
+-                    .build()
++                    .enable_all();
++                #[cfg(target_os = "horizon")]
++                {
++                    rt.thread_stack_size(2 * 1024 * 1024);
++                }
++                let rt = match rt.build()
+                 {
+                     Ok(rt) => rt,
+                     Err(e) => {
+@@ -774,6 +782,7 @@ impl NativeClient {
+                 Ok(Err(e)) => {
+                     // Stops what the handshake already started, such as the data punch.
+                     shared.shutdown.store(true, Ordering::SeqCst);
++                    let _ = worker.join();
+                     return Err(e);
+                 }
+                 // Keep waiting unless budget spent or cancelled. Disconnected = worker died
+@@ -787,6 +796,7 @@ impl NativeClient {
+                     // code 0, so the host tears down instead of holding a virtual display.
+                     shared.quit.store(true, Ordering::SeqCst);
+                     shared.shutdown.store(true, Ordering::SeqCst);
++                    let _ = worker.join();
+                     return Err(PunktfunkError::Timeout);
+                 }
+             }
+diff --git a/crates/punktfunk-core/src/quic/endpoint.rs b/crates/punktfunk-core/src/quic/endpoint.rs
+index 7c149a7d3..477cbd26c 100644
+--- a/crates/punktfunk-core/src/quic/endpoint.rs
++++ b/crates/punktfunk-core/src/quic/endpoint.rs
+@@ -148,25 +148,42 @@ pub fn server_shared(
+     key_pem: &str,
+     idle: std::time::Duration,
+     alpns: &[&[u8]],
+-) -> anyhow_result::Result<(quinn::Endpoint, std::net::UdpSocket)> {
++) -> anyhow_result::Result<(quinn::Endpoint, Arc<std::net::UdpSocket>)> {
+     use rustls::pki_types::pem::PemObject;
+     let cert_der = rustls::pki_types::CertificateDer::from_pem_slice(cert_pem.as_bytes())
+         .map_err(|e| anyhow_result::Error::msg(format!("cert pem: {e}")))?;
+     let key_der = rustls::pki_types::PrivateKeyDer::from_pem_slice(key_pem.as_bytes())
+         .map_err(|e| anyhow_result::Error::msg(format!("key pem: {e}")))?;
+     let server_config = server_config(cert_der, key_der, idle, alpns)?;
+-    let socket = std::net::UdpSocket::bind(addr)?;
+-    crate::transport::grow_socket_buffers(&socket);
+-    let media = socket.try_clone()?;
+     let runtime = quinn::default_runtime()
+         .ok_or_else(|| anyhow_result::Error::msg("no async runtime found".into()))?;
+-    let ep = quinn::Endpoint::new(
+-        quinn::EndpointConfig::default(),
+-        Some(server_config),
+-        socket,
+-        runtime,
+-    )?;
+-    Ok((ep, media))
++    // Horizon: devkitPro's `fcntl(F_DUPFD_CLOEXEC)` UDP duplicate goes `EBADF` once mio owns
++    // the original, and mio's poll loop on `Endpoint::new` misses loopback wakes. Use the
++    // native-thread `ClientSocket` abstract socket and share the `Arc<UdpSocket>` directly.
++    #[cfg(target_os = "horizon")]
++    {
++        let (socket, media) = crate::transport::shared::client_socket(addr)?;
++        let ep = quinn::Endpoint::new_with_abstract_socket(
++            quinn::EndpointConfig::default(),
++            Some(server_config),
++            socket,
++            runtime,
++        )?;
++        Ok((ep, media.into_socket()))
++    }
++    #[cfg(not(target_os = "horizon"))]
++    {
++        let socket = std::net::UdpSocket::bind(addr)?;
++        crate::transport::grow_socket_buffers(&socket);
++        let media = Arc::new(socket.try_clone()?);
++        let ep = quinn::Endpoint::new(
++            quinn::EndpointConfig::default(),
++            Some(server_config),
++            socket,
++            runtime,
++        )?;
++        Ok((ep, media))
++    }
+ }
+ 
+ fn server_config(
+diff --git a/crates/punktfunk-core/src/transport/shared.rs b/crates/punktfunk-core/src/transport/shared.rs
+index d690fb7b4..7256c921a 100644
+--- a/crates/punktfunk-core/src/transport/shared.rs
++++ b/crates/punktfunk-core/src/transport/shared.rs
+@@ -6,10 +6,11 @@
+ //! quinn through the [`ClientSocket`] it returns; media from the host's address goes to the
+ //! session through [`ClientMedia`], a bounded queue. Video never enters an async runtime.
+ //!
+-//! Host: [`MediaSender`] sends media on a clone of the endpoint's socket, toward the
+-//! connection's current address and from the address the client dialed. quinn moves that
+-//! address on the first authenticated packet from a new one and validates it afterwards, so
+-//! media follows a migration before QUIC has confirmed it.
++//! Host: [`MediaSender`] sends media on a clone of the endpoint's socket (or, on Horizon,
++//! shares the `Arc` because cloned UDP descriptors go `EBADF`), toward the connection's
++//! current address and from the address the client dialed. quinn moves that address on the
++//! first authenticated packet from a new one and validates it afterwards, so media follows a
++//! migration before QUIC has confirmed it.
+ 
+ use super::Transport;
+ use quinn::udp::{RecvMeta, Transmit, UdpSocketState};
+@@ -34,7 +35,15 @@ const MEDIA_QUEUE: usize = 8192;
+ /// QUIC packets queued for quinn; quinn drains them on every wake.
+ const QUIC_QUEUE: usize = 1024;
+ /// Datagrams one read takes, and the buffer each needs with GRO.
++/// Horizon has no GRO (`quinn-udp` fallback BATCH_SIZE is 1); 32×64 KiB per
++/// demux thread (client + loopback demo host) was most of the remaining RAM.
++#[cfg(target_os = "horizon")]
++const BATCH: usize = 1;
++#[cfg(not(target_os = "horizon"))]
+ const BATCH: usize = 32;
++#[cfg(target_os = "horizon")]
++const READ_BUF: usize = 2048;
++#[cfg(not(target_os = "horizon"))]
+ const READ_BUF: usize = 64 * 1024;
+ /// How long the reader waits before it looks at its stop flag again.
+ const WAIT: Duration = Duration::from_millis(100);
+@@ -89,6 +98,7 @@ pub struct ClientSocket {
+     state: Arc<UdpSocketState>,
+     quic: Arc<Mutex<QuicQueue>>,
+     stats: Arc<SharedStats>,
++    reader: Mutex<Option<std::thread::JoinHandle<()>>>,
+ }
+ 
+ impl std::fmt::Debug for ClientSocket {
+@@ -102,6 +112,15 @@ impl std::fmt::Debug for ClientSocket {
+ impl Drop for ClientSocket {
+     fn drop(&mut self) {
+         self.stats.stop.store(true, Ordering::Relaxed);
++        // The reader holds the live fd. Join it before that Arc drops from under poll.
++        if let Some(h) = self
++            .reader
++            .lock()
++            .unwrap_or_else(|e| e.into_inner())
++            .take()
++        {
++            let _ = h.join();
++        }
+     }
+ }
+ 
+@@ -123,6 +142,11 @@ impl ClientMedia {
+     pub fn try_clone_socket(&self) -> std::io::Result<UdpSocket> {
+         self.socket.try_clone()
+     }
++
++    /// The live fd, without `dup`. Horizon's cloned UDP fds go EBADF after poll.
++    pub fn into_socket(self) -> Arc<UdpSocket> {
++        self.socket
++    }
+ }
+ 
+ /// Bind the client's shared socket and start its reader. Hand the [`ClientSocket`] to
+@@ -145,15 +169,19 @@ pub fn client_socket(bind: SocketAddr) -> std::io::Result<(Arc<ClientSocket>, Cl
+         media: tx,
+         stats: stats.clone(),
+     };
+-    std::thread::Builder::new()
+-        .name("punktfunk-demux".into())
+-        .spawn(move || reader.run())?;
++    let mut demux = std::thread::Builder::new().name("punktfunk-demux".into());
++    #[cfg(target_os = "horizon")]
++    {
++        demux = demux.stack_size(2 * 1024 * 1024);
++    }
++    let reader_thread = demux.spawn(move || reader.run())?;
+     Ok((
+         Arc::new(ClientSocket {
+             socket: socket.clone(),
+             state,
+             quic,
+             stats: stats.clone(),
++            reader: Mutex::new(Some(reader_thread)),
+         }),
+         ClientMedia {
+             rx: Mutex::new(rx),
+@@ -354,7 +382,7 @@ impl Transport for ClientMedia {
+ 
+ /// The host's media sender on a connection's shared socket.
+ pub struct MediaSender {
+-    socket: UdpSocket,
++    socket: Arc<UdpSocket>,
+     state: UdpSocketState,
+     conn: quinn::Connection,
+     v6_socket: bool,
+@@ -365,8 +393,15 @@ pub struct MediaSender {
+ impl MediaSender {
+     /// `socket` is the endpoint's own (a clone of what quinn reads); `conn` names the peer.
+     pub fn new(socket: &UdpSocket, conn: quinn::Connection) -> std::io::Result<MediaSender> {
+-        let socket = socket.try_clone()?;
+-        let state = UdpSocketState::new((&socket).into())?;
++        Self::from_shared(Arc::new(socket.try_clone()?), conn)
++    }
++
++    /// `socket` is shared with the endpoint's reader without `dup` (`fcntl(F_DUPFD_CLOEXEC)`).
++    pub fn from_shared(
++        socket: Arc<UdpSocket>,
++        conn: quinn::Connection,
++    ) -> std::io::Result<MediaSender> {
++        let state = UdpSocketState::new((&*socket).into())?;
+         let v6_socket = socket.local_addr()?.is_ipv6();
+         Ok(MediaSender {
+             socket,
+@@ -398,7 +433,7 @@ impl MediaSender {
+         segment: Option<usize>,
+     ) -> std::io::Result<()> {
+         self.state.send(
+-            (&self.socket).into(),
++            (&*self.socket).into(),
+             &Transmit {
+                 destination: to,
+                 ecn: None,
+@@ -498,7 +533,7 @@ mod tests {
+ 
+     async fn pair() -> (
+         quinn::Endpoint,
+-        std::net::UdpSocket,
++        Arc<std::net::UdpSocket>,
+         quinn::Endpoint,
+         ClientMedia,
+         quinn::Connection,
+@@ -536,7 +571,7 @@ mod tests {
+             crate::quic::endpoint::negotiated_alpn(&host_conn).as_deref(),
+             Some(crate::quic::v2::registry::ALPN)
+         );
+-        let sender = MediaSender::new(&socket, host_conn.clone()).unwrap();
++        let sender = MediaSender::from_shared(socket, host_conn.clone()).unwrap();
+         const N: usize = 3000;
+         let packets: Vec<Vec<u8>> = (0..N)
+             .map(|i| {
+diff --git a/crates/punktfunk-ffi/src/demo_host.rs b/crates/punktfunk-ffi/src/demo_host.rs
+index 11e71636f..e2b60f66e 100644
+--- a/crates/punktfunk-ffi/src/demo_host.rs
++++ b/crates/punktfunk-ffi/src/demo_host.rs
+@@ -94,11 +94,17 @@ impl DemoHost {
+     /// Listen on a free loopback port with a fresh certificate. `codecs` is the
+     /// [`quic::CODEC_H264`]-family mask the embedder can encode.
+     pub fn start(codecs: u8) -> Result<DemoHost> {
+-        let rt = tokio::runtime::Builder::new_multi_thread()
+-            .worker_threads(2)
++        let mut rt = tokio::runtime::Builder::new_multi_thread();
++        rt.worker_threads(2)
+             .thread_name("pf-demo-host")
+-            .enable_all()
+-            .build()?;
++            .enable_all();
++        // Horizon pthread stacks default far below tokio's 2 MiB; give the demo host runtime
++        // the same 2 MiB per worker as the client pump.
++        #[cfg(target_os = "horizon")]
++        {
++            rt.thread_stack_size(2 * 1024 * 1024);
++        }
++        let rt = rt.build()?;
+         let cert = rcgen::generate_simple_self_signed(vec!["punktfunk".into()])
+             .map_err(|_| PunktfunkError::Crypto)?;
+         let fingerprint = punktfunk_core::tls::cert_fingerprint(cert.cert.der());
+@@ -119,7 +125,7 @@ impl DemoHost {
+             endpoint.clone(),
+             shared.clone(),
+             codecs,
+-            Arc::new(media_socket),
++            media_socket,
+         ));
+         Ok(DemoHost {
+             shared,
+@@ -172,14 +178,20 @@ impl DemoHost {
+ 
+ impl Drop for DemoHost {
+     fn drop(&mut self) {
+-        if let Some(conn) = self.shared.current.lock().unwrap().take() {
++        if let Some(conn) = self
++            .shared
++            .current
++            .lock()
++            .unwrap_or_else(|e| e.into_inner())
++            .take()
++        {
+             conn.close(0u32.into(), b"demo host stopped");
+         }
+         self.endpoint.close(0u32.into(), b"demo host stopped");
+         // Disconnects the send thread's queue so it exits.
+-        *self.shared.video.lock().unwrap() = None;
++        *self.shared.video.lock().unwrap_or_else(|e| e.into_inner()) = None;
+         if let Some(rt) = self.rt.take() {
+-            rt.shutdown_timeout(Duration::from_millis(500));
++            rt.shutdown_timeout(Duration::from_secs(2));
+         }
+     }
+ }
+@@ -209,8 +221,9 @@ async fn accept_loop(
+         let (shared, media_socket) = (shared.clone(), media_socket.clone());
+         tokio::spawn(async move {
+             let Ok(conn) = incoming.await else { return };
+-            if let Err(e) = serve(&conn, &shared, codecs, &media_socket).await {
+-                tracing::debug!(error = %e, "demo session ended");
++            match serve(&conn, &shared, codecs, media_socket).await {
++                Ok(()) => tracing::info!("demo session ended cleanly"),
++                Err(e) => tracing::warn!(error = %e, "demo session ended with error"),
+             }
+             release(&shared, conn.stable_id());
+         });
+@@ -237,7 +250,7 @@ async fn serve(
+     conn: &quinn::Connection,
+     shared: &Arc<Shared>,
+     codecs: u8,
+-    media_socket: &UdpSocket,
++    media_socket: Arc<UdpSocket>,
+ ) -> Result<()> {
+     let id = conn.stable_id();
+     let v2 = endpoint::negotiated_alpn(conn).as_deref() == Some(registry::ALPN);
+@@ -389,7 +402,10 @@ async fn serve(
+         None => {
+             let keys =
+                 endpoint::media_keys(conn, &session_id, suite).ok_or(PunktfunkError::Crypto)?;
+-            let sender = MediaSender::new(media_socket, conn.clone())?;
++            let sender = MediaSender::from_shared(media_socket, conn.clone()).map_err(|e| {
++                tracing::warn!(error = %e, "demo host MediaSender::from_shared failed");
++                PunktfunkError::Io(e)
++            })?;
+             let media = MediaV2 {
+                 clock_origin_ns: clock.origin_ns(),
+                 keys: Some(keys),
+@@ -403,16 +419,36 @@ async fn serve(
+         }
+     };
+     let video = tokio::task::spawn_blocking(move || send_video(open, video_rx));
+-    let dgrams = Dgrams {
+-        conn,
++    let dgrams = Arc::new(Dgrams {
++        conn: conn.clone(),
+         clock: v2.then_some(clock),
+-    };
++    });
++    // Audio and input are best-effort: an opus init failure or closed datagram channel must
++    // never tear down video or the QUIC control stream.
++    let _audio = tokio::spawn({
++        let (dgrams, shared) = (dgrams.clone(), shared.clone());
++        async move {
++            if let Err(e) = audio_loop(&dgrams, &shared).await {
++                tracing::warn!(error = %e, "demo audio loop stopped");
++            }
++        }
++    });
++    let _input = tokio::spawn({
++        let (dgrams, shared) = (dgrams.clone(), shared.clone());
++        async move {
++            input_loop(&dgrams, &shared).await;
++        }
++    });
+     // Control runs before the punch lands: the client's clock handshake comes first.
+     tokio::select! {
+-        r = control_loop(send, recv, shared, id) => r,
+-        () = input_loop(&dgrams, shared) => Ok(()),
+-        r = audio_loop(&dgrams, shared) => r,
+-        r = video => r.map_err(|_| PunktfunkError::Closed)?,
++        r = control_loop(send, recv, shared, id) => {
++            tracing::info!(?r, "demo control_loop finished");
++            r
++        }
++        r = video => {
++            tracing::info!(?r, "demo video task finished");
++            r.map_err(|_| PunktfunkError::Closed)?
++        }
+     }
+ }
+ 
+@@ -422,12 +458,12 @@ type OpenSession = Box<dyn FnOnce() -> Result<Session> + Send>;
+ 
+ /// The connection's datagrams as `punktfunk/1` encodings. On `punktfunk/2` (`clock` set) they
+ /// carry a kind, and host stamps leave in session time.
+-struct Dgrams<'a> {
+-    conn: &'a quinn::Connection,
++struct Dgrams {
++    conn: quinn::Connection,
+     clock: Option<Arc<SessionClock>>,
+ }
+ 
+-impl Dgrams<'_> {
++impl Dgrams {
+     /// `false` once the connection is gone.
+     fn send(&self, mut d: Vec<u8>) -> bool {
+         if let Some(clock) = &self.clock {
+@@ -457,14 +493,20 @@ impl Dgrams<'_> {
+ }
+ 
+ fn send_video(open: OpenSession, rx: mpsc::Receiver<(Vec<u8>, bool)>) -> Result<()> {
+-    let mut session = open()?;
++    let mut session = open().map_err(|e| {
++        tracing::warn!(error = %e, "demo send_video open failed");
++        e
++    })?;
+     for (au, keyframe) in rx {
+         let flags = if keyframe {
+             FLAG_PIC | FLAG_SOF
+         } else {
+             FLAG_PIC
+         };
+-        session.submit_frame(&au, wall_clock_ns(), u32::from(flags))?;
++        if let Err(e) = session.submit_frame(&au, wall_clock_ns(), u32::from(flags)) {
++            tracing::warn!(error = %e, "demo submit_frame failed");
++            return Err(e);
++        }
+     }
+     Ok(())
+ }
+@@ -506,7 +548,7 @@ async fn control_loop(
+     }
+ }
+ 
+-async fn input_loop(dgrams: &Dgrams<'_>, shared: &Shared) {
++async fn input_loop(dgrams: &Dgrams, shared: &Shared) {
+     let mut pad_buttons = [0u32; 16];
+     while let Some(dg) = dgrams.recv().await {
+         if dg.first() != Some(&INPUT_MAGIC) {
+@@ -544,7 +586,7 @@ fn is_press(ev: &InputEvent, pad_buttons: &mut [u32; 16]) -> bool {
+     }
+ }
+ 
+-async fn audio_loop(dgrams: &Dgrams<'_>, shared: &Shared) -> Result<()> {
++async fn audio_loop(dgrams: &Dgrams, shared: &Shared) -> Result<()> {
+     let layout = LAYOUT_STEREO;
+     let mut encoder = opus::MSEncoder::new(
+         SAMPLE_RATE_HZ,
+@@ -553,7 +595,10 @@ async fn audio_loop(dgrams: &Dgrams<'_>, shared: &Shared) -> Result<()> {
+         layout.mapping,
+         opus::Application::LowDelay,
+     )
+-    .map_err(|_| PunktfunkError::Unsupported("opus encoder"))?;
++    .map_err(|e| {
++        tracing::warn!(error = ?e, "demo opus::MSEncoder::new failed");
++        PunktfunkError::Unsupported("opus encoder")
++    })?;
+     let mut tick = tokio::time::interval(Duration::from_millis(5));
+     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+     let mut pcm = [0f32; AUDIO_FRAME_SAMPLES * 2];
+diff --git a/crates/punktfunk-host/src/native.rs b/crates/punktfunk-host/src/native.rs
+index 581ed25eb..57bd20d30 100644
+--- a/crates/punktfunk-host/src/native.rs
++++ b/crates/punktfunk-host/src/native.rs
+@@ -341,7 +341,6 @@ pub(crate) async fn serve(
+         alpns,
+     )
+     .map_err(|e| anyhow!("QUIC server endpoint: {e}"))?;
+-    let media_socket = Arc::new(media_socket);
+     tracing::info!(
+         port = opts.port,
+         source = ?opts.source,

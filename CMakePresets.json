@@ -7,11 +7,23 @@
   },
   "configurePresets": [
     {
-      "name": "linux-release",
-      "displayName": "Portable Linux Release",
-      "description": "Native Linux release build with SDL3, embedded resources, and required VA-API H.264/HEVC decoding.",
+      "name": "switch-release",
+      "displayName": "Nintendo Switch Release",
+      "description": "punktfunk.nro with deko3d; run inside the pf-switch-dev container (scripts/dev.sh), the repo mounted at /src.",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/build/switch",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "PLATFORM_SWITCH": "ON",
+        "USE_DEKO3D": "ON"
+      }
+    },
+    {
+      "name": "linux-dev",
+      "displayName": "Linux desktop (development)",
+      "description": "Off-console development build against system SDL2, FFmpeg, Opus, Jansson and libpng; also needs the pf-switch-dev container because punktfunk-rs/.cargo/config.toml expects /src.",
       "generator": "Ninja",
-      "binaryDir": "${sourceDir}/build/linux-release",
+      "binaryDir": "${sourceDir}/build/linux",
       "condition": {
         "type": "equals",
         "lhs": "${hostSystemName}",
@@ -19,101 +31,22 @@
       },
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
-        "CMAKE_INSTALL_PREFIX": "/usr",
         "PLATFORM_DESKTOP": "ON",
         "MOONLIGHT_DESKTOP_USE_SYSTEM_PACKAGES": "ON",
-        "MOONLIGHT_DESKTOP_EMBED_RESOURCES": "ON",
-        "MOONLIGHT_LINUX_REQUIRE_VAAPI": "ON",
-        "USE_SDL3": "ON"
+        "USE_SDL2": "ON"
       }
-    },
-    {
-      "name": "windows-ucrt64-base",
-      "hidden": true,
-      "generator": "Ninja",
-      "binaryDir": "${sourceDir}/build/windows-ucrt64",
-      "condition": {
-        "type": "equals",
-        "lhs": "${hostSystemName}",
-        "rhs": "Windows"
-      },
-      "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Release",
-        "PLATFORM_DESKTOP": "ON",
-        "MOONLIGHT_DESKTOP_USE_SYSTEM_PACKAGES": "ON",
-        "USE_D3D11": "ON"
-      }
-    },
-    {
-      "name": "windows-ucrt64-c-root-base",
-      "hidden": true,
-      "inherits": "windows-ucrt64-base",
-      "environment": {
-        "PATH": "C:/msys64/ucrt64/bin;C:/msys64/usr/bin;$penv{PATH}"
-      },
-      "cacheVariables": {
-        "CMAKE_C_COMPILER": "C:/msys64/ucrt64/bin/gcc.exe",
-        "CMAKE_CXX_COMPILER": "C:/msys64/ucrt64/bin/g++.exe",
-        "CMAKE_RC_COMPILER": "C:/msys64/ucrt64/bin/windres.exe",
-        "MOONLIGHT_DESKTOP_SYSTEM_PREFIX": "C:/msys64/ucrt64"
-      }
-    },
-    {
-      "name": "windows-ucrt64-release",
-      "inherits": "windows-ucrt64-c-root-base",
-      "displayName": "Windows UCRT64 Release",
-      "description": "Build Moonlight for Windows with MSYS2 UCRT64 system packages using the recommended C:/msys64 root."
-    },
-    {
-      "name": "windows-clangarm64-base",
-      "hidden": true,
-      "generator": "Ninja",
-      "binaryDir": "${sourceDir}/build/windows-clangarm64",
-      "condition": {
-        "type": "equals",
-        "lhs": "${hostSystemName}",
-        "rhs": "Windows"
-      },
-      "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Release",
-        "PLATFORM_DESKTOP": "ON",
-        "MOONLIGHT_DESKTOP_USE_SYSTEM_PACKAGES": "ON",
-        "USE_D3D11": "ON"
-      }
-    },
-    {
-      "name": "windows-clangarm64-c-root-base",
-      "hidden": true,
-      "inherits": "windows-clangarm64-base",
-      "environment": {
-        "PATH": "C:/msys64/clangarm64/bin;C:/msys64/usr/bin;$penv{PATH}"
-      },
-      "cacheVariables": {
-        "CMAKE_C_COMPILER": "C:/msys64/clangarm64/bin/clang.exe",
-        "CMAKE_CXX_COMPILER": "C:/msys64/clangarm64/bin/clang++.exe",
-        "CMAKE_RC_COMPILER": "C:/msys64/clangarm64/bin/llvm-rc.exe",
-        "MOONLIGHT_DESKTOP_SYSTEM_PREFIX": "C:/msys64/clangarm64"
-      }
-    },
-    {
-      "name": "windows-clangarm64-release",
-      "inherits": "windows-clangarm64-c-root-base",
-      "displayName": "Windows CLANGARM64 Release",
-      "description": "Build Moonlight for Windows ARM64 with MSYS2 CLANGARM64 system packages using the recommended C:/msys64 root."
     }
   ],
   "buildPresets": [
     {
-      "name": "linux-release",
-      "configurePreset": "linux-release"
+      "name": "switch-release",
+      "configurePreset": "switch-release",
+      "targets": [ "punktfunk.nro" ]
     },
     {
-      "name": "windows-ucrt64-release",
-      "configurePreset": "windows-ucrt64-release"
-    },
-    {
-      "name": "windows-clangarm64-release",
-      "configurePreset": "windows-clangarm64-release"
+      "name": "linux-dev",
+      "configurePreset": "linux-dev",
+      "targets": [ "punktfunk" ]
     }
   ]
 }

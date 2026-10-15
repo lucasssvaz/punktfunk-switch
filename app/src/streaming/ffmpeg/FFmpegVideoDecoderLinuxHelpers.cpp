@@ -1,3 +1,6 @@
+// Copyright 2026 Lucas Saavedra Vaz
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 #include "FFmpegVideoDecoderLinuxHelpers.hpp"
 
 #if defined(__linux__) && defined(PLATFORM_DESKTOP)
@@ -5,7 +8,7 @@
 #include <array>
 #include <string>
 
-#include <Limelight.h>
+#include "StreamTypes.hpp"
 
 #include "AVFrameHolder.hpp"
 #include "Settings.hpp"

@@ -1,0 +1,95 @@
+name: Build
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+
+concurrency:
+  group: build-${{github.event.pull_request.number || github.ref}}
+  cancel-in-progress: true
+
+jobs:
+  switch:
+    name: Nintendo Switch
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - uses: docker/setup-buildx-action@v3
+
+      # devkitA64 + libnx + portlibs + nightly Rust with rust-src (docker/Dockerfile).
+      - name: Build pf-switch-dev image
+        uses: docker/build-push-action@v6
+        with:
+          context: docker
+          tags: pf-switch-dev
+          load: true
+          cache-from: type=gha,scope=pf-switch-dev
+          cache-to: type=gha,mode=max,scope=pf-switch-dev
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            .cache/cargo-registry
+            .cache/cargo-git
+            punktfunk-rs/target
+          key: switch-cargo-${{ hashFiles('punktfunk-rs/Cargo.lock', 'punktfunk-rs/patches/**/Cargo.toml') }}
+          restore-keys: switch-cargo-
+
+      - name: Build punktfunk.nro
+        run: |
+          scripts/dev.sh bash -c 'cmake -B build/switch -DCMAKE_BUILD_TYPE=Release -DPLATFORM_SWITCH=ON -DUSE_DEKO3D=ON \
+            && make -C build/switch -j"$(nproc)" punktfunk.nro'
+
+      - name: Package
+        run: scripts/package-switch.sh build/switch
+
+      - name: Upload release layout
+        uses: actions/upload-artifact@v4
+        with:
+          name: punktfunk-switch
+          path: dist/*
+
+      - name: Upload debug ELF
+        uses: actions/upload-artifact@v4
+        with:
+          name: punktfunk-switch-debug-elf
+          path: build/switch/punktfunk.elf
+
+  linux:
+    # Development harness only (no release artifact): proves the shared code still builds off-console.
+    name: Linux desktop (dev build)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build pf-switch-dev image
+        uses: docker/build-push-action@v6
+        with:
+          context: docker
+          tags: pf-switch-dev
+          load: true
+          cache-from: type=gha,scope=pf-switch-dev
+
+      - name: Build punktfunk (desktop)
+        run: |
+          docker run --rm -v "$PWD:/src" -w /src pf-switch-dev bash -c '
+            set -e
+            apt-get update -qq
+            grep -v "^#" docker/linux-deps.txt | xargs apt-get install -y -qq --no-install-recommends
+            cmake -B build/linux -G Ninja -DCMAKE_BUILD_TYPE=Release -DPLATFORM_DESKTOP=ON \
+              -DMOONLIGHT_DESKTOP_USE_SYSTEM_PACKAGES=ON -DUSE_SDL2=ON
+            ninja -C build/linux punktfunk'

@@ -1,25 +1,18 @@
 //
 //  main.cpp
-//  Moonlight
+//  punktfunk (based on Moonlight-Switch)
 //
 //  Created by XITRIX on 26.05.2021.
+//  Copyright 2026 Lucas Saavedra Vaz
 //
-
+//  SPDX-License-Identifier: GPL-3.0-or-later
+//
 // Switch include only necessary for demo videos recording
 #ifdef __SWITCH__
 #include <switch.h>
 #endif
 
-#ifdef __PSV__
-extern "C" {
-// PVR_PSP2 allocates its EGL/GLES state from the Sony libc heap. Match the
-// memory model used by working Borealis Vita applications such as wiliwili.
-unsigned int _newlib_heap_size_user      = 220 * 1024 * 1024;
-unsigned int _pthread_stack_default_user = 2 * 1024 * 1024;
-unsigned int sceLibcHeapSize             = 24 * 1024 * 1024;
-}
-#endif
-
+#include <cstdio>
 #include <cstdlib>
 
 #include <borealis.hpp>
@@ -30,18 +23,16 @@ unsigned int sceLibcHeapSize             = 24 * 1024 * 1024;
 #include "link_cell.hpp"
 #include "main_activity.hpp"
 #include "main_tabs_view.hpp"
+#include "self_test.hpp"
 #include "settings_tab.hpp"
 #include "views/boolean_slider_cell.hpp"
 
-#include "DiscoverManager.hpp"
-#include "MoonlightSession.hpp"
-#include "SwitchMoonlightSessionDecoderAndRenderProvider.hpp"
-
-
-#if defined(_WIN32) && defined(__SDL2__)
-#include <SDL.h>
-#define SDL_MAIN
-#endif
+#include "InputManager.hpp"
+#include "PlatformDecoderAndRenderProvider.hpp"
+#include "PunktfunkClient.hpp"
+#include "PunktfunkSession.hpp"
+#include "pf_switch.h"
+#include "punktfunk_core.h"
 
 #if defined(__SDL3__)
 #include <SDL3/SDL_main.h>
@@ -51,6 +42,25 @@ unsigned int sceLibcHeapSize             = 24 * 1024 * 1024;
 #include <main_args.hpp>
 
 using namespace brls::literals; // for _i18n
+
+namespace {
+void pf_core_log(uint8_t level, const char* target, const char* message, void*) {
+    switch (level) {
+    case 1:
+        brls::Logger::error("[{}] {}", target, message);
+        break;
+    case 2:
+        brls::Logger::warning("[{}] {}", target, message);
+        break;
+    case 3:
+        brls::Logger::info("[{}] {}", target, message);
+        break;
+    default:
+        brls::Logger::debug("[{}] {}", target, message);
+        break;
+    }
+}
+} // namespace
 
 #ifdef __SWITCH__
 namespace {
@@ -90,10 +100,21 @@ void preferSwitchCore(int ordinal) {
 } // namespace
 #endif
 
-int main(int argc, char* argv[]) {
-    // Enable recording for Twitter memes
 #ifdef __SWITCH__
-    appletInitializeGamePlayRecording();
+extern "C" void pfSwitchSocketInit(void);
+extern "C" void pfSwitchSocketExit(void);
+extern "C" void pf_threads_reap_all(void);
+#endif
+
+int main(int argc, char* argv[]) {
+#ifdef __SWITCH__
+    // UDP TAP to the nxlink PC. Do not TCP-connect 28771 here: that blocks a
+    // BSD session and pairing/QUIC then fail.
+    pfSwitchSocketInit();
+
+    // Gameplay-recording tmem is 96 MiB. libnx's tmemCreate memsets the buffer
+    // without checking memalign, so a failed alloc is a Data Abort (FAR=0)
+    // before the UI (or --self-test) starts. We don't record to the album.
     appletSetWirelessPriorityMode(AppletWirelessPriorityMode_OptimizedForWlan);
 
     // Keep the UI loop away from the hottest streaming worker core.
@@ -125,19 +146,51 @@ int main(int argc, char* argv[]) {
 
     registerDeepLinkHandler();
 
-#if defined(PLATFORM_VISIONOS)
-    brls::Application::setMaximumUIScale(1.0f);
-#endif
+    PunktfunkSession::set_provider(new PlatformDecoderAndRenderProvider());
 
-    MoonlightSession::set_provider(
-            new SwitchMoonlightSessionDecoderAndRenderProvider());
+    const bool self_test = pf_self_test_enabled(argc, argv);
+    auto home = Application::getPlatform()->getHomeDirectory("punktfunk");
+    if (self_test) {
+        // Do not parse leftover self-test/settings.json here: json_load after
+        // deko3d is a Data Abort. settings-persist round-trips later.
+        Settings::instance().set_working_dir(home + "/self-test", false);
+        Settings::instance().set_key_dir(home + "/identity");
+    } else {
+        // Load before createWindow so jansson mallocs while the GPU heap is free.
+        Settings::instance().set_working_dir(home);
+    }
+    Settings::instance().set_launch_path(argc > 0 ? argv[0] : "");
 
     brls::Application::createWindow("title"_i18n);
 
-    auto home = Application::getPlatform()->getHomeDirectory("Moonlight-Switch");
-    Settings::instance().set_working_dir(home);
-    Settings::instance().set_launch_path(argc > 0 ? argv[0] : "");
+    // SwitchInputManager exists only after createWindow. Calling this earlier
+    // is a Data Abort on an uninitialized inputManager pointer.
+    StreamInputManager::stopRumble();
+#ifdef __SWITCH__
+    pfSwitchSocketInit();
+#endif
+    setvbuf(stdout, nullptr, _IOLBF, 0);
+#ifdef __SWITCH__
+    // Mirror borealis/core logs to sdmc so a crash still leaves a trail, and
+    // flush stdout so `nx punktfunk.nro` shows them live in the nxlink terminal.
+    if (FILE* log_file = fopen(Settings::instance().log_path().c_str(), "a")) {
+        setvbuf(log_file, nullptr, _IOLBF, 0);
+        brls::Logger::getLogEvent()->subscribe([log_file](brls::Logger::TimePoint, brls::LogLevel,
+                                                          const std::string& line) {
+            fprintf(log_file, "%s\n", line.c_str());
+            fflush(log_file);
+        });
+    }
+#endif
     brls::Logger::info("Working dir, {}", home);
+
+    pfsw_install_panic_log((Settings::instance().working_dir() + "/panic.log").c_str());
+    punktfunk_set_log_callback(3, pf_core_log, nullptr);
+    brls::Logger::info("punktfunk core ABI {} (header {})", punktfunk_abi_version(), PUNKTFUNK_ABI_VERSION);
+    // Key generation takes a moment on the console; have the identity ready before the
+    // first pairing attempt. pf_spawn: aws-lc key generation wants a roomy stack.
+    if (!self_test)
+        pf_spawn([] { PunktfunkClient::instance().ensure_identity(); });
 
     // Have the application register an action on every activity that will quit
     // when you press BUTTON_START
@@ -164,32 +217,27 @@ int main(int argc, char* argv[]) {
     brls::getStyle().addMetric("about/padding_sides", 75);
     brls::getStyle().addMetric("about/description_margin", 50);
 
-    // Create and push the main activity to the stack if cannot run game from arguments
-    if (!startFromArgs(argc, argv)) {
+    if (self_test) {
+        pf_self_test_prepare(argc, argv);
+        brls::Application::pushActivity(pf_self_test_activity());
+    } else if (!startFromArgs(argc, argv)) {
         brls::Application::pushActivity(new MainActivity());
     }
 
     brls::Application::enableDebuggingView(Settings::instance().write_log());
     brls::Application::setSwapInputKeys(Settings::instance().swap_ui_keys());
 
-    // Run the app. The Vita development loop waits for this marker so a
-    // successful launch means at least one complete Borealis frame rendered.
-#ifdef __PSV__
-    bool vitaHealthReported = false;
-#endif
     while (brls::Application::mainLoop()) {
-#ifdef __PSV__
-        if (!vitaHealthReported) {
-            brls::Logger::info("VITA_HEALTH: READY");
-            vitaHealthReported = true;
-        }
-#endif
+        if (self_test)
+            pf_self_test_tick();
     }
 
-    // Exit
-#if defined(PLATFORM_TVOS)
-    exit(0);
+#ifdef __SWITCH__
+    PunktfunkClient::instance().cancel_find_hosts();
+    PunktfunkClient::instance().cancel_artwork();
+    pf_threads_reap_all();
+    pfSwitchSocketExit();
 #endif
-    
-    return EXIT_SUCCESS;
+
+    return self_test && pf_self_test_failed() ? EXIT_FAILURE : EXIT_SUCCESS;
 }

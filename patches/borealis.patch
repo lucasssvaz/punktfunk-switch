@@ -1,0 +1,61 @@
+diff --git a/library/include/borealis/core/logger.hpp b/library/include/borealis/core/logger.hpp
+index 3752ae4c..46834932 100644
+--- a/library/include/borealis/core/logger.hpp
++++ b/library/include/borealis/core/logger.hpp
+@@ -130,9 +130,7 @@ class Logger
+             printf("! Invalid log format string: \"%s\": %s\n", fmt::basic_string_view<char>(format).data(), e.what());
+         }
+ 
+-#ifdef __MINGW32__
+         fflush(logOut);
+-#endif
+     }
+ 
+     template <typename... Args>
+diff --git a/library/include/borealis/platforms/switch/switch_platform.hpp b/library/include/borealis/platforms/switch/switch_platform.hpp
+index 69932536..c1390519 100644
+--- a/library/include/borealis/platforms/switch/switch_platform.hpp
++++ b/library/include/borealis/platforms/switch/switch_platform.hpp
+@@ -78,18 +78,18 @@ class SwitchPlatform : public Platform
+     ThemeVariant themeVariant;
+     std::string locale;
+ 
+-    SwitchAudioPlayer* audioPlayer;
+-    SwitchInputManager* inputManager;
+-    SwitchImeManager* imeManager;
++    SwitchAudioPlayer* audioPlayer = nullptr;
++    SwitchInputManager* inputManager = nullptr;
++    SwitchImeManager* imeManager = nullptr;
+ 
+ #ifdef BOREALIS_USE_DEKO3D
+-    SwitchVideoContext* videoContext;
++    SwitchVideoContext* videoContext = nullptr;
+ #elif defined(__SDL2__)
+-    SDLVideoContext* videoContext;
++    SDLVideoContext* videoContext = nullptr;
+ #else
+-    GLFWVideoContext* videoContext;
++    GLFWVideoContext* videoContext = nullptr;
+ #endif
+-    SwitchFontLoader* fontLoader;
++    SwitchFontLoader* fontLoader = nullptr;
+     AppletHookCookie applet_hook_cookie;
+ };
+ 
+diff --git a/library/lib/platforms/switch/switch_wrapper.c b/library/lib/platforms/switch/switch_wrapper.c
+index 83e154e8..365cd67d 100644
+--- a/library/lib/platforms/switch/switch_wrapper.c
++++ b/library/lib/platforms/switch/switch_wrapper.c
+@@ -38,8 +38,10 @@ void userAppInit()
+     }
+     else
+     {
+-        cfg.num_bsd_sessions = 2;
+-        cfg.sb_efficiency    = 1;
++        // hbmenu launches us as an applet. 2 sessions is not enough once a
++        // blocking nxlink connect holds one for SYN retry.
++        cfg.num_bsd_sessions = 4;
++        cfg.sb_efficiency    = 2;
+         socketInitialize(&cfg);
+     }
+ 

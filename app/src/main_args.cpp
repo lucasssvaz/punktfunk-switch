@@ -3,14 +3,15 @@
 //  Moonlight
 //
 //  Created by XITRIX on 22.01.2024.
+//  Copyright 2026 Lucas Saavedra Vaz
 //
-
+//  SPDX-License-Identifier: GPL-3.0-or-later
+//
 #include "main_args.hpp"
 #include <borealis.hpp>
 #include "streaming_view.hpp"
 
 #include <algorithm>
-#include <charconv>
 #include <cctype>
 #include <optional>
 #include <string_view>
@@ -26,11 +27,13 @@ bool canStartApp(int argc, char** argv);
 
 namespace {
 
-constexpr std::string_view DEEP_LINK_SCHEME = "moonlightswitch";
+constexpr std::string_view DEEP_LINK_SCHEME = "punktfunk";
 
 struct LaunchRequest {
-    std::string mac;
+    // Host certificate fingerprint (hex); the stable handle across address changes.
+    std::string host;
     std::string ip;
+    // Library id; empty launches the desktop.
     std::string appId;
     std::string appName;
 };
@@ -122,8 +125,8 @@ std::string normalizeKey(std::string key) {
 void setLaunchValue(LaunchRequest& request, std::string key, std::string value) {
     key = normalizeKey(std::move(key));
 
-    if (key == "host" || key == "mac") {
-        request.mac = std::move(value);
+    if (key == "host" || key == "fingerprint" || key == "fp") {
+        request.host = toLower(std::move(value));
     } else if (key == "ip" || key == "address") {
         request.ip = std::move(value);
     } else if (key == "appid") {
@@ -233,17 +236,6 @@ void parseArgumentPayload(std::string_view payload, LaunchRequest& request) {
     }
 }
 
-std::optional<int> parseAppId(const std::string& value) {
-    int appId = 0;
-    const char* begin = value.data();
-    const char* end = begin + value.size();
-    const auto [ptr, ec] = std::from_chars(begin, end, appId);
-    if (ec != std::errc() || ptr != end) {
-        return std::nullopt;
-    }
-    return appId;
-}
-
 LaunchRequest parseDeepLinkUrl(const std::string& url) {
     LaunchRequest request;
 
@@ -274,12 +266,12 @@ LaunchRequest parseDeepLinkUrl(const std::string& url) {
         const std::string authority = urlDecode(
             std::string_view(url).substr(hostStart, hostEnd - hostStart));
         if (!authority.empty() && authority != "launch" &&
-            request.mac.empty() && request.ip.empty()) {
+            request.host.empty() && request.ip.empty()) {
             request.ip = authority;
         }
     }
 
-    if (request.mac.empty() && request.ip.empty() && request.appId.empty()) {
+    if (request.host.empty() && request.ip.empty() && request.appId.empty()) {
         const size_t payloadStart = url.compare(schemeEnd + 1, 2, "//") == 0
                                         ? schemeEnd + 3
                                         : schemeEnd + 1;
@@ -301,28 +293,29 @@ bool startFromLaunchRequest(LaunchRequest request, bool resetActivityStack) {
     }
 
     decodeSwitchAppName(request.appName);
+    decodeSwitchAppName(request.appId);
 
-    Logger::debug("Host {}", request.mac);
+    Logger::debug("Host {}", request.host);
     Logger::debug("IP {}", request.ip);
     Logger::debug("Id {}", request.appId);
     Logger::debug("Name {}", request.appName);
 
-    if ((request.mac.empty() && request.ip.empty()) || request.appId.empty()) {
-        return false;
-    }
-
-    const std::optional<int> appId = parseAppId(request.appId);
-    if (!appId.has_value()) {
-        Logger::warning("Invalid app id in forwarder launch: {}", request.appId);
+    if (request.host.empty() && request.ip.empty()) {
         return false;
     }
 
     auto hosts = Settings::instance().hosts();
-    if (auto it = std::find_if(hosts.begin(), hosts.end(), [request](const Host& host) {
-            return host.mac == request.mac || host.has_address(request.ip);
-        }); it != std::end(hosts)) {
+    auto it = std::find_if(hosts.begin(), hosts.end(), [&request](const Host& host) {
+        return !request.host.empty() && host.fingerprint == request.host;
+    });
+    if (it == hosts.end()) {
+        it = std::find_if(hosts.begin(), hosts.end(), [&request](const Host& host) {
+            return !request.ip.empty() && host.address == request.ip;
+        });
+    }
+    if (it != std::end(hosts)) {
         const Host& host = *it;
-        AppInfo info { request.appName, appId.value() };
+        App info{request.appName, request.appId};
 
         if (resetActivityStack) {
             Application::giveFocus(nullptr);
@@ -337,8 +330,8 @@ bool startFromLaunchRequest(LaunchRequest request, bool resetActivityStack) {
         return true;
     }
 
-    Logger::warning("No paired host matched forwarder launch host={} ip={}",
-                    request.mac, request.ip);
+    Logger::warning("No saved host matched forwarder launch host={} ip={}",
+                    request.host, request.ip);
     return false;
 }
 

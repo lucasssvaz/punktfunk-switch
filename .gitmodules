@@ -1,15 +1,12 @@
 [submodule "extern/borealis"]
 	path = extern/borealis
 	url = https://github.com/XITRIX/borealis.git
-[submodule "extern/moonlight-common-c"]
-	path = extern/moonlight-common-c
-	url = https://github.com/XITRIX/moonlight-common-c.git
 [submodule "extern/CImg"]
 	path = extern/CImg
 	url = https://github.com/XITRIX/CImg.git
-[submodule "extern/vcpkg"]
-	path = extern/vcpkg
-	url = https://github.com/microsoft/vcpkg.git
 [submodule "extern/mdns"]
 	path = extern/mdns
 	url = https://github.com/mjansson/mdns.git
+[submodule "extern/punktfunk"]
+	path = extern/punktfunk
+	url = https://github.com/punktfunk/punktfunk.git

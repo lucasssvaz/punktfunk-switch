@@ -1,0 +1,13 @@
+# Copyright 2026 Lucas Saavedra Vaz
+# SPDX-License-Identifier: Apache-2.0
+
+[package]
+name = "pf-hello"
+version = "0.1.0"
+edition = "2021"
+authors = ["Lucas Saavedra Vaz"]
+license = "Apache-2.0"
+publish = false
+
+[lib]
+crate-type = ["staticlib"]

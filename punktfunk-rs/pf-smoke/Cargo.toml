@@ -1,0 +1,22 @@
+# Copyright 2026 Lucas Saavedra Vaz
+# SPDX-License-Identifier: Apache-2.0
+
+[package]
+name = "pf-smoke"
+version = "0.1.0"
+edition = "2021"
+authors = ["Lucas Saavedra Vaz"]
+license = "Apache-2.0"
+publish = false
+
+[lib]
+crate-type = ["staticlib"]
+
+[dependencies]
+tokio = { version = "1.53", features = ["rt-multi-thread", "net", "time", "sync", "macros"] }
+socket2 = { version = "0.6", features = ["all"] }
+if-addrs = "0.15"
+libc = "0.2"
+getrandom02 = { package = "getrandom", version = "0.2" }
+getrandom03 = { package = "getrandom", version = "0.3" }
+getrandom04 = { package = "getrandom", version = "0.4" }

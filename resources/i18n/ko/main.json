@@ -1,27 +1,10 @@
 {
-    "about": {
-        "about": "Moonlight-Switch는 닌텐도 스위치용 Moonlight-Common-C를 기반으로 하는 타사 게임 스트리밍 클라이언트입니다.",
-        "link_gbatemp": "GbaTemp 페이지",
-        "link_github": "GitHub 페이지",
-        "link_patreon": "Patreon 페이지",
-        "links": "링크",
-        "thanks": "특별히 감사한 분",
-        "thanks_1": " Rock88과 그의 Moonlight-NX, 이 앱에서 많은 코드가 재사용",
-        "thanks_2": " Borealis를 만든 Natinusala",
-        "thanks_3": " Moonlight 팀, 그들 없이는 불가능",
-        "thanks_4": " LibNX 관련 문제를 해결하는 데 도움을 준 Cameron Gutman",
-        "thanks_5": " 앱 개발에 참여한 모든 사람",
-        "thanks_6": " 홈브류를 사용해 주셔서 감사합니다!",
-        "title": "정보",
-        "version": "XITRIX의 Moonlight-Switch v{}"
-    },
     "add_host": {
         "connect": "연결",
         "host_ip": "호스트 IP",
         "manual": "수동",
         "pair_postfix": " 호스트 장치",
         "pair_prefix": "페어링\n\n진입 ",
-        "paired_error": "이미 페어링되었음\n구성이 업데이트되었음",
         "search": "검색",
         "search_error": "검색할 수 없음",
         "search_refresh": "새로 고침",
@@ -32,10 +15,7 @@
         "run_current": "현재 앱 실행",
         "running": "실행 중",
         "star": "별",
-        "terminate": "종료",
-        "terminate_current_app": "현재 앱 종료",
         "terminate_postfix": "\n\n저장되지 않은 모든 진행 상황이 손실될 수 있음",
-        "terminate_prefix": "종료 ",
         "unstar": "별 해제"
     },
     "common": {
@@ -146,9 +126,7 @@
         "overlay_setup_message": "오버레이를 여는 데 사용할 키를 누르세요:\n\n",
         "overlay_time": "몇 초 안에 열려면 길게 누름",
         "overlay_zero_time": "0 (즉시)",
-        "paop": "PC에서 오디오 재생",
         "quality": "품질 (설정이 높을수록 CPU 오버클럭 필요)",
-        "request_hdr": "HDR 비디오 요청",
         "resolution": "해상도",
         "resolution_native": "기본",
         "resolution_scale": "배율",
@@ -167,11 +145,27 @@
         "touchscreen_mouse_mode": "터치스크린 모드",
         "use_hw_decoding": "하드웨어 가속 활성화",
         "use_system_button": "Use system button",
-        "usops": "스트리밍 최적 재생 설정 사용",
         "video_bitrate": "동영상 전송율",
         "video_codec": "동영상 코덱",
+        "codec_auto": "자동",
+        "video_fit": "화면 맞춤",
+        "video_fit_fit": "맞춤 (여백)",
+        "video_fit_crop": "자르기",
+        "video_fit_stretch": "늘리기",
+        "touch_mode": "터치 입력",
+        "touch_mode_trackpad": "트랙패드",
+        "touch_mode_pointer": "직접 포인터",
+        "touch_mode_touch": "터치 전달",
+        "touch_mode_off": "끔",
         "volume_amplification": "볼륨 증폭 허용",
-        "zero_threads": "0 (스레드 사용 안 함)"
+        "zero_threads": "0 (스레드 사용 안 함)",
+        "keep_host_audio": "호스트에서 오디오 유지",
+        "stats_tier": "통계 오버레이 상세",
+        "stats_tier_basic": "기본",
+        "stats_tier_standard": "표준",
+        "stats_tier_detailed": "자세히",
+        "gamepad_type": "에뮬레이트 컨트롤러",
+        "send_motion": "모션 전송 (자이로)"
     },
     "streaming": {
         "connection": "연결",
@@ -194,5 +188,5 @@
         "favorites": "즐겨찾기",
         "settings": "설정"
     },
-    "title": "달빛"
+    "title": "PFSW"
 }

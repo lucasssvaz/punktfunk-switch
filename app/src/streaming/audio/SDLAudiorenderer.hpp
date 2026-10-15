@@ -1,3 +1,6 @@
+// Copyright 2026 Lucas Saavedra Vaz
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 #pragma once
 
 #include "IAudioRenderer.hpp"
@@ -8,31 +11,22 @@
 #include <SDL.h>
 #include <SDL_audio.h>
 #endif
-#include <opus/opus_multistream.h>
-
-#define MAX_CHANNEL_COUNT 6
-#define FRAME_SIZE 240
-#define FRAME_BUFFER 12
+#include <vector>
 
 class SDLAudioRenderer : public IAudioRenderer {
   public:
     SDLAudioRenderer(){};
     ~SDLAudioRenderer(){};
 
-    int init(int audio_configuration,
-             const POPUS_MULTISTREAM_CONFIGURATION opus_config, void* context,
-             int ar_flags) override;
+    int init(int channels, int sample_rate) override;
     void cleanup() override;
-    void decode_and_play_sample(char* sample_data, int sample_length) override;
-    int capabilities() override;
+    void play_pcm(const float* samples, int frame_count, int channels) override;
 
   private:
-    OpusMSDecoder* decoder;
-    short pcmBuffer[FRAME_SIZE * MAX_CHANNEL_COUNT];
-    SDL_AudioDeviceID dev;
+    std::vector<int16_t> pcmBuffer;
+    SDL_AudioDeviceID dev = 0;
 #if defined(__SDL3__)
     SDL_AudioStream* stream = nullptr;
 #endif
-    int channelCount;
     int audioOverflowBytes = 16000;
 };

@@ -1,0 +1,35 @@
+# Copyright 2026 Lucas Saavedra Vaz
+# SPDX-License-Identifier: Apache-2.0
+
+[workspace]
+resolver = "2"
+members = ["pf-hello", "pf-abi-check", "pf-smoke", "pf-switch"]
+
+[profile.release]
+opt-level = 3
+debug = 1
+lto = "thin"
+codegen-units = 4
+panic = "abort"
+
+[profile.dev]
+panic = "abort"
+
+[patch.crates-io]
+# libc's horizon bindings describe the 3DS (libctru); the Switch's newlib + libnx BSD sockets
+# differ in layouts and constants. See patches/libc/src/unix/newlib/nx/.
+libc = { path = "patches/libc" }
+# The rest mostly widen `all(target_os = "horizon", target_arch = "arm")` (3DS) checks to the
+# Switch. mio additionally gets a loopback-UDP waker (no pipes on Horizon); if-addrs drops its
+# netlink change notifier there.
+mio = { path = "patches/mio" }
+tokio = { path = "patches/tokio" }
+getrandom_02 = { package = "getrandom", path = "patches/getrandom-0.2" }
+getrandom_03 = { package = "getrandom", path = "patches/getrandom-0.3" }
+getrandom_04 = { package = "getrandom", path = "patches/getrandom-0.4" }
+if-addrs = { path = "patches/if-addrs" }
+# quinn-udp: Horizon takes the portable fallback backend (no ECN/GSO/pktinfo).
+quinn-udp = { path = "patches/quinn-udp" }
+# aws-lc-sys is materialised by scripts/fetch-patched-crates.sh (too big to vendor): patched to
+# draw entropy from getentropy() (horizon_shims.c) instead of /dev/urandom.
+aws-lc-sys = { path = "patches/aws-lc-sys" }

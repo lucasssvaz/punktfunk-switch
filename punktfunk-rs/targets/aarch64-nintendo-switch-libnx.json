@@ -1,0 +1,43 @@
+{
+  "arch": "aarch64",
+  "cpu": "cortex-a57",
+  "crt-objects-fallback": "false",
+  "data-layout": "e-m:e-p270:32:32-p271:32:32-p272:64:64-i8:8:32-i16:16:32-i64:64-i128:128-n32:64-S128-Fn32",
+  "env": "newlib",
+  "exe-suffix": ".elf",
+  "features": "+v8a,+neon,+crypto,+crc",
+  "has-thread-local": false,
+  "linker": "aarch64-none-elf-gcc",
+  "linker-flavor": "gnu-cc",
+  "llvm-target": "aarch64-unknown-none",
+  "max-atomic-width": 128,
+  "metadata": {
+    "description": "ARM64 Nintendo Switch, Horizon, libnx/newlib (requires devkitA64)",
+    "host_tools": false,
+    "std": true,
+    "tier": 3
+  },
+  "no-default-libraries": false,
+  "os": "horizon",
+  "panic-strategy": "abort",
+  "position-independent-executables": true,
+  "pre-link-args": {
+    "gnu-cc": [
+      "-specs=/opt/devkitpro/libnx/switch.specs",
+      "-march=armv8-a+crc+crypto",
+      "-mtune=cortex-a57",
+      "-mtp=soft",
+      "-fPIE"
+    ]
+  },
+  "relocation-model": "pic",
+  "relro-level": "off",
+  "stack-probes": {
+    "kind": "inline"
+  },
+  "target-family": [
+    "unix"
+  ],
+  "target-pointer-width": 64,
+  "vendor": "nintendo"
+}

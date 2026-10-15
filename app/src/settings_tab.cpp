@@ -3,8 +3,10 @@
 //  Moonlight
 //
 //  Created by XITRIX on 26.05.2021.
+//  Copyright 2026 Lucas Saavedra Vaz
 //
-
+//  SPDX-License-Identifier: GPL-3.0-or-later
+//
 #ifdef PLATFORM_SWITCH
 #include <borealis/platforms/switch/switch_input.hpp>
 #endif
@@ -15,6 +17,7 @@
 #include "button_selecting_dialog.hpp"
 #include "mapping_layout_editor.hpp"
 #include "UpscalingSupport.hpp"
+#include "punktfunk_core.h"
 #include <cmath>
 #include <iomanip>
 #include <sstream>
@@ -65,22 +68,24 @@ std::string getRcasStrengthText(float strength) {
 }
 }
 
-#if defined(__SWITCH__)
-std::vector<std::string> audio_backends {
-    "Audren",
-};
-#elif defined(__SDL2__) || defined(__SDL3__)
-std::vector<std::string> audio_backends {
-#if defined(__SDL3__)
-    "SDL3",
-#else
-    "SDL2",
-#endif
-};
-#else
-std::vector<std::string> audio_backends;
-#endif
+namespace {
+std::vector<std::string> touchModeNames() {
+    return {
+        "settings/touch_mode_trackpad"_i18n,
+        "settings/touch_mode_pointer"_i18n,
+        "settings/touch_mode_touch"_i18n,
+        "settings/touch_mode_off"_i18n,
+    };
+}
 
+std::vector<std::string> pictureFitNames() {
+    return {
+        "settings/video_fit_fit"_i18n,
+        "settings/video_fit_crop"_i18n,
+        "settings/video_fit_stretch"_i18n,
+    };
+}
+} // namespace
 
 SettingsTab::SettingsTab() {
     // Inflate the tab from the XML file
@@ -88,9 +93,7 @@ SettingsTab::SettingsTab() {
 
     std::vector<std::string> resolutions = {
         "settings/resolution_native"_i18n, "360p", "480p", "540p", "720p", "1080p",
-#if !defined(__PSV__)
         "1440p",
-#endif
     };
     resolution->setText("settings/resolution"_i18n);
     resolution->setData(resolutions);
@@ -101,41 +104,28 @@ SettingsTab::SettingsTab() {
         GET_SETTINGS(resolution, 540, 3);
         GET_SETTINGS(resolution, 720, 4);
         GET_SETTINGS(resolution, 1080, 5);
-#if !defined(__PSV__)
         GET_SETTINGS(resolution, 1440, 6);
-#endif
         DEFAULT;
     }
 
+    static const int renderScalePercents[] = {50, 67, 75, 100, 125, 150, 200};
     std::vector<std::string> nativeResolutionScales = {
-        "0.5x", "0.75x", "1.0x",
-#if !defined(__PSV__)
-        "2.0x",
-#endif
+        "0.5×", "0.67×", "0.75×", "1.0×", "1.25×", "1.5×", "2.0×",
     };
     resolutionScale->setText("settings/resolution_scale"_i18n);
     resolutionScale->setData(nativeResolutionScales);
-    switch (Settings::instance().native_resolution_scale()) {
-        GET_SETTINGS(resolutionScale, 50, 0);
-        GET_SETTINGS(resolutionScale, 75, 1);
-        GET_SETTINGS(resolutionScale, 100, 2);
-#if !defined(__PSV__)
-        GET_SETTINGS(resolutionScale, 200, 3);
-#endif
-        default:
-            resolutionScale->setSelection(2);
-            break;
+    {
+        int scale = Settings::instance().native_resolution_scale();
+        int scaleIndex = 3;
+        for (int i = 0; i < 7; i++) {
+            if (renderScalePercents[i] == scale)
+                scaleIndex = i;
+        }
+        resolutionScale->setSelection(scaleIndex);
     }
     resolutionScale->getEvent()->subscribe([](int selected) {
-        switch (selected) {
-            SET_SETTING(0, set_native_resolution_scale(50));
-            SET_SETTING(1, set_native_resolution_scale(75));
-            SET_SETTING(2, set_native_resolution_scale(100));
-#if !defined(__PSV__)
-            SET_SETTING(3, set_native_resolution_scale(200));
-#endif
-            DEFAULT;
-        }
+        if (selected >= 0 && selected < 7)
+            Settings::instance().set_native_resolution_scale(renderScalePercents[selected]);
     });
 
 #ifdef SUPPORT_UPSCALING
@@ -174,18 +164,9 @@ SettingsTab::SettingsTab() {
             ditheringStrengthToSliderProgress(ditheringStrength));
         updateDitheringControls(Settings::instance().dithering());
 
-#if defined(PLATFORM_APPLE) && !defined(PLATFORM_TVOS)
-        upscaling->removeFromSuperView(true);
-        upscalingMode->init(
-            "settings/upscaling"_i18n,
-            {"hints/off"_i18n, "MetalFX", "FSR1"},
-            (int)Settings::instance().upscaling_mode(),
-            [](int value) { Settings::instance().set_upscaling_mode((UpscalingMode)value); });
-#else
         upscalingMode->removeFromSuperView(true);
         upscaling->init("settings/upscaling"_i18n, Settings::instance().upscaling(),
                         [](bool value) { Settings::instance().set_upscaling(value); });
-#endif
         rcas->init("settings/rcas_sharpening"_i18n, Settings::instance().rcas(),
                    [updateRcasControls](bool value) {
                        Settings::instance().set_rcas(value);
@@ -210,14 +191,7 @@ SettingsTab::SettingsTab() {
     rcas->removeFromSuperView(true);
 #endif
 
-    auto updateNativeResolutionScaleVisibility = [this]() {
-        resolutionScale->setVisibility(
-            resolution->getSelection() == 0 ? brls::Visibility::VISIBLE
-                                            : brls::Visibility::GONE);
-    };
-    updateNativeResolutionScaleVisibility();
-
-    resolution->getEvent()->subscribe([this, updateNativeResolutionScaleVisibility](int selected) {
+    resolution->getEvent()->subscribe([](int selected) {
         switch (selected) {
             SET_SETTING(0, set_resolution(-1));
             SET_SETTING(1, set_resolution(360));
@@ -225,61 +199,32 @@ SettingsTab::SettingsTab() {
             SET_SETTING(3, set_resolution(540));
             SET_SETTING(4, set_resolution(720));
             SET_SETTING(5, set_resolution(1080));
-#if !defined(__PSV__)
             SET_SETTING(6, set_resolution(1440));
-#endif
             DEFAULT;
         }
-        updateNativeResolutionScaleVisibility();
     });
 
-#if defined(__PSV__)
-    std::vector<std::string> fpss = {
-        "24",
-        "30",
-        "40",
-        "50",
-        "60",
-    };
-#else
     std::vector<std::string> fpss = {
         "30",
         "40",
         "60",
         "120",
     };
-#endif
     fps->setText("settings/fps"_i18n);
     fps->setData(fpss);
     switch (Settings::instance().fps()) {
-#if defined(__PSV__)
-        GET_SETTINGS(fps, 24, 0);
-        GET_SETTINGS(fps, 30, 1);
-        GET_SETTINGS(fps, 40, 2);
-        GET_SETTINGS(fps, 50, 3);
-        GET_SETTINGS(fps, 60, 4);
-#else
         GET_SETTINGS(fps, 30, 0);
         GET_SETTINGS(fps, 40, 1);
         GET_SETTINGS(fps, 60, 2);
         GET_SETTINGS(fps, 120, 3);
-#endif
         DEFAULT;
     }
     fps->getEvent()->subscribe([](int selected) {
         switch (selected) {
-#if defined(__PSV__)
-            SET_SETTING(0, set_fps(24));
-            SET_SETTING(1, set_fps(30));
-            SET_SETTING(2, set_fps(40));
-            SET_SETTING(3, set_fps(50));
-            SET_SETTING(4, set_fps(60));
-#else
             SET_SETTING(0, set_fps(30));
             SET_SETTING(1, set_fps(40));
             SET_SETTING(2, set_fps(60));
             SET_SETTING(3, set_fps(120));
-#endif
             DEFAULT;
         }
     });
@@ -306,10 +251,9 @@ SettingsTab::SettingsTab() {
     });
 
     std::vector<VideoCodec> supportedCodecs = {
-        H264,
-#if !defined(__PSV__)
-        H265,
-#endif
+        CODEC_AUTO,
+        CODEC_H265,
+        CODEC_H264,
     };
 
     std::vector<std::string> supportedCodecNames;
@@ -330,25 +274,12 @@ SettingsTab::SettingsTab() {
                     Settings::instance().set_video_codec(supportedCodecs[selected]);
                 });
 
-    requestHdr->init("settings/request_hdr"_i18n, Settings::instance().request_hdr(),
-                     [](bool value) { Settings::instance().set_request_hdr(value); });
+    videoFit->init("settings/video_fit"_i18n, pictureFitNames(),
+                   (int)Settings::instance().picture_fit(), [](int selected) {
+                       Settings::instance().set_picture_fit((PictureFit)selected);
+                   });
 
- #ifndef SUPPORT_HDR
-    requestHdr->removeFromSuperView(true);
- #endif
-
-    hwDecoding->init("settings/use_hw_decoding"_i18n, Settings::instance().use_hw_decoding(),
-                     [](bool value) { Settings::instance().set_use_hw_decoding(value); });
-
-#if defined(__linux__) && defined(PLATFORM_DESKTOP)
-    hwDecoding->setEnabled(true);
-#else
-    hwDecoding->setEnabled(false);
-#endif
-
-#if defined(__PSV__)
-    const float mbpsMaxLimit = 20000;
-#elif defined(PLATFORM_SWITCH)
+#if defined(PLATFORM_SWITCH)
     const float mbpsMaxLimit = 100000;
 #else
     const float mbpsMaxLimit = 150000;
@@ -368,22 +299,28 @@ SettingsTab::SettingsTab() {
     });
     slider->setProgress(progress);
 
-#if defined(__SWITCH__)
-    audioBackend->init("settings/audio_backend"_i18n, audio_backends, 0,
-                       [](int) { Settings::instance().set_audio_backend(AUDREN); });
-#elif defined(__SDL2__) || defined(__SDL3__)
-    audioBackend->init("settings/audio_backend"_i18n, audio_backends, Settings::instance().audio_backend(),
-                       [](int selected) { Settings::instance().set_audio_backend((AudioBackend)selected); });
-#else
-    audioBackend->removeFromSuperView(true);
-#endif
+    keepHostAudio->init("settings/keep_host_audio"_i18n, Settings::instance().keep_host_audio(),
+                        [](bool value) { Settings::instance().set_keep_host_audio(value); });
 
-    optimal->init("settings/usops"_i18n, Settings::instance().sops(),
-                  [](bool value) { Settings::instance().set_sops(value); });
+    statsTier->init("settings/stats_tier"_i18n,
+                    {"settings/stats_tier_basic"_i18n, "settings/stats_tier_standard"_i18n,
+                     "settings/stats_tier_detailed"_i18n},
+                    Settings::instance().stats_tier() - 1,
+                    [](int selected) { Settings::instance().set_stats_tier(selected + 1); });
 
-    pcAudio->init(
-        "settings/paop"_i18n, Settings::instance().play_audio(),
-        [](bool value) { Settings::instance().set_play_audio(value); });
+    static const std::vector<int> gamepadTypes = {
+        PUNKTFUNK_GAMEPAD_XBOX360, PUNKTFUNK_GAMEPAD_XBOXONE, PUNKTFUNK_GAMEPAD_SWITCHPRO,
+        PUNKTFUNK_GAMEPAD_JOYCON_PAIR, PUNKTFUNK_GAMEPAD_DUALSENSE, PUNKTFUNK_GAMEPAD_DUALSHOCK4,
+    };
+    auto gamepadIt = std::find(gamepadTypes.begin(), gamepadTypes.end(), Settings::instance().gamepad_type());
+    gamepadType->init("settings/gamepad_type"_i18n,
+                      {"Xbox 360", "Xbox One", "Switch Pro Controller", "Joy-Con pair", "DualSense",
+                       "DualShock 4"},
+                      gamepadIt == gamepadTypes.end() ? 0 : int(gamepadIt - gamepadTypes.begin()),
+                      [](int selected) { Settings::instance().set_gamepad_type(gamepadTypes[selected]); });
+
+    sendMotion->init("settings/send_motion"_i18n, Settings::instance().send_motion(),
+                     [](bool value) { Settings::instance().set_send_motion(value); });
 
     swapUi->init("settings/swap_ui"_i18n, Settings::instance().swap_ui_keys(),
                  [](bool value) {
@@ -711,11 +648,10 @@ SettingsTab::SettingsTab() {
                 Settings::instance().set_volume(100);
         });
 
-    touchscreenMouseMode->init("settings/touchscreen_mouse_mode"_i18n,
-                               Settings::instance().touchscreen_mouse_mode(),
-                               [this](bool value) {
-                                   Settings::instance().set_touchscreen_mouse_mode(value);
-                               });
+    touchMode->init("settings/touch_mode"_i18n, touchModeNames(),
+                    (int)Settings::instance().touch_mode(), [](int selected) {
+                        Settings::instance().set_touch_mode((TouchMode)selected);
+                    });
 
     swapMouseKeys->init("settings/swap_mouse_keys"_i18n,
                         Settings::instance().swap_mouse_keys(),

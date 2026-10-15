@@ -1,6 +1,11 @@
+// Copyright 2026 Lucas Saavedra Vaz
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 #pragma once
 
-#include <Limelight.h>
+#include "StreamTypes.hpp"
+#include <cstddef>
+#include <cstdint>
 
 extern "C" {
 #include <libavcodec/avcodec.h>
@@ -39,12 +44,14 @@ struct VideoDecodeStats {
 class IFFmpegVideoDecoder {
   public:
     virtual ~IFFmpegVideoDecoder()= default;
-    virtual int setup(int video_format, int width, int height, int redraw_rate,
-                      void* context, int dr_flags) = 0;
-    virtual void start(){};
-    virtual void stop(){};
+    // `video_format` is one VIDEO_FORMAT_* value (StreamTypes.hpp).
+    virtual int setup(int video_format, int width, int height, int redraw_rate) = 0;
     virtual void cleanup() = 0;
-    virtual int submit_decode_unit(PDECODE_UNIT decode_unit) = 0;
-    virtual int capabilities() const = 0;
+    // One complete access unit (Annex-B). `data` only needs to stay valid for the call.
+    // `queue_us` is how long the AU waited between reassembly and this call.
+    // Returns DECODE_OK, or DECODE_NEED_IDR when the decoder lost its references.
+    virtual int submit_au(const uint8_t* data, size_t len, uint64_t pts_us,
+                          bool keyframe, uint32_t frame_index,
+                          uint32_t queue_us) = 0;
     virtual VideoDecodeStats* video_decode_stats() = 0;
 };

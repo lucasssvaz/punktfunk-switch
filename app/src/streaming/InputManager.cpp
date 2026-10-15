@@ -1,10 +1,13 @@
+// Copyright 2026 Lucas Saavedra Vaz
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 
 #ifdef __SWITCH__
 #include <switch.h>
 #endif
 
 #include "InputManager.hpp"
-#include "Limelight.h"
+#include "PunktfunkInput.hpp"
 #include "Settings.hpp"
 #include <borealis.hpp>
 #include <streaming_view.hpp>
@@ -17,85 +20,113 @@ using namespace brls;
 
 namespace {
 constexpr float STICK_SCROLL_DEADZONE = 0.2f;
-constexpr float MOONLIGHT_WHEEL_DELTA = 120.0f;
-constexpr auto DESKTOP_SCROLL_GESTURE_TIMEOUT =
-    std::chrono::milliseconds(600);
+constexpr auto DESKTOP_SCROLL_GESTURE_TIMEOUT = std::chrono::milliseconds(600);
+constexpr float RAD_TO_DEG = 57.2957795f;
 
 float applyStickScrollDeadzone(float axis, float configuredDeadzone) {
     float deadzone = std::fmax(STICK_SCROLL_DEADZONE, configuredDeadzone);
     return std::fabs(axis) < deadzone ? 0.f : axis;
 }
+
+float mouseSpeedMultiplier() {
+    return (float)Settings::instance().get_mouse_speed_multiplier() / 100.f * 1.5f + 0.5f;
 }
 
-float fsqrt_(float f) {
-    int i = *(int *)&f;
-    i = (i >> 1) + 0x1fbb67ae;
-    float f1 = *(float *)&i;
-    return 0.5F * (f1 + f / f1);
-
+uint32_t padType() {
+    int type = Settings::instance().gamepad_type();
+    return type > 0 ? (uint32_t)type : PUNKTFUNK_GAMEPAD_XBOX360;
 }
 
-MoonlightInputManager::MoonlightInputManager() {
+int connectedPads() {
+    int count = (int)brls::Application::getPlatform()->getInputManager()->getControllersConnectedCount();
+#ifdef __SWITCH__
+    // Handheld Joy-Cons / a lone Pro Controller must still appear as pad 0.
+    // A zero count means the host never builds a virtual device.
+    if (count < 1)
+        count = 1;
+#endif
+    return std::clamp(count, 0, PF_GAMEPADS_MAX);
+}
+} // namespace
+
+StreamInputManager::StreamInputManager() {
     auto inputManager = brls::Application::getPlatform()->getInputManager();
 
-    inputManager
-        ->getMouseCusorOffsetChanged()
-        ->subscribe([this](brls::Point offset) {
-            if (!inputEnabled) return;
+    inputManager->getMouseCusorOffsetChanged()->subscribe([this](brls::Point offset) {
+        if (!inputEnabled || inputDropped)
+            return;
+        if (offset.x != 0 || offset.y != 0) {
+            float multiplier = mouseSpeedMultiplier();
+            sendRelativeMouseMove(brls::Point(offset.x * multiplier, offset.y * multiplier));
+        }
+    });
 
-            if (offset.x != 0 || offset.y != 0) {
-                float multiplier =
-                        (float) Settings::instance().get_mouse_speed_multiplier() / 100.f *
-                        1.5f + 0.5f;
+    inputManager->getMouseScrollOffsetChanged()->subscribe([this](brls::Point scroll) {
+        if (!inputEnabled)
+            return;
+        handleDesktopMouseScroll(scroll);
+    });
 
-                if (!this->inputDropped) {
-                    sendRelativeMouseMove(
-                        brls::Point(offset.x * multiplier,
-                                    offset.y * multiplier));
-                }
-            }
-        });
+    inputManager->getKeyboardKeyStateChanged()->subscribe([this](brls::KeyState state) {
+        if (!inputEnabled)
+            return;
+        uint16_t vk = StreamInputManager::keyToVK(state.key);
+        if (state.pressed)
+            pressedKeys.insert(vk);
+        else
+            pressedKeys.erase(vk);
+        pf_input::key(vk, state.pressed);
+    });
 
-    inputManager
-        ->getMouseScrollOffsetChanged()
-        ->subscribe([this](brls::Point scroll) {
-            if (!inputEnabled) return;
-            handleDesktopMouseScroll(scroll);
-        });
-
-    inputManager
-        ->getKeyboardKeyStateChanged()
-        ->subscribe([this](brls::KeyState state) {
-            if (!inputEnabled) return;
-
-            int vkKey = MoonlightInputManager::glfwKeyToVKKey(state.key);
-            char modifiers = state.mods;
-            LiSendKeyboardEvent(vkKey,
-                                state.pressed ? KEY_ACTION_DOWN : KEY_ACTION_UP,
-                                modifiers);
-        });
-
-    inputManager
-        ->getControllerSensorStateChanged()
-        ->subscribe([this](brls::SensorEvent event) {
-            if (!inputEnabled) return;
-            
-            switch (event.type) {
-                case brls::SensorEventType::ACCEL:
-                    LiSendControllerMotionEvent((uint8_t)event.controllerIndex, LI_MOTION_TYPE_ACCEL, event.data[0], event.data[1], event.data[2]);
-                    break;
-                case brls::SensorEventType::GYRO:
-                    // Convert rad/s to deg/s
-                    LiSendControllerMotionEvent((uint8_t)event.controllerIndex, LI_MOTION_TYPE_GYRO, 
-                        event.data[0] * 57.2957795f, 
-                        event.data[1] * 57.2957795f, 
-                        event.data[2] * 57.2957795f);
-                    break;
-            }
-        });
+    inputManager->getControllerSensorStateChanged()->subscribe([this](brls::SensorEvent event) {
+        if (!inputEnabled || !Settings::instance().send_motion())
+            return;
+        switch (event.type) {
+        case brls::SensorEventType::ACCEL:
+            std::copy(event.data, event.data + 3, lastAccel);
+            break;
+        case brls::SensorEventType::GYRO: {
+            const float gyro[3] = {event.data[0] * RAD_TO_DEG, event.data[1] * RAD_TO_DEG,
+                                   event.data[2] * RAD_TO_DEG};
+            pf_input::motion((uint8_t)event.controllerIndex, gyro, lastAccel);
+            break;
+        }
+        }
+    });
 }
 
-void MoonlightInputManager::handleDesktopMouseScroll(brls::Point scroll) {
+void StreamInputManager::resetSession() {
+    announcedPads = 0;
+    for (auto& state : lastGamepadStates)
+        state = GamepadState{};
+    for (auto& seq : snapshotSeq)
+        seq = 0;
+    lastSnapshotRefresh = {};
+    pressedKeys.clear();
+    activeTouchIDs.clear();
+    touchMouseDown = false;
+    inputDropped = false;
+}
+
+void StreamInputManager::stopRumble() {
+    auto* platform = brls::Application::getPlatform();
+    if (!platform)
+        return;
+    auto* input = platform->getInputManager();
+    if (!input)
+        return;
+    int count = (int)input->getControllersConnectedCount();
+#ifdef __SWITCH__
+    // Handheld is pad 0 even when the connected count is still 0.
+    if (count < 1)
+        count = 1;
+#endif
+    count = std::clamp(count, 1, PF_GAMEPADS_MAX);
+    for (int i = 0; i < count; i++)
+        input->sendRumble((unsigned short)i, 0, 0);
+}
+
+void StreamInputManager::handleDesktopMouseScroll(brls::Point scroll) {
     const auto now = std::chrono::steady_clock::now();
     if (lastDesktopScrollEvent.time_since_epoch().count() == 0 ||
         now - lastDesktopScrollEvent > DESKTOP_SCROLL_GESTURE_TIMEOUT) {
@@ -108,8 +139,7 @@ void MoonlightInputManager::handleDesktopMouseScroll(brls::Point scroll) {
     // Trackpads frequently emit a small perpendicular component. Some virtual
     // mouse drivers quantize that component into a full wheel tick, so lock a
     // gesture to one axis instead of forwarding diagonal jitter to the host.
-    if (scroll.y != 0 &&
-        (scroll.x == 0 || std::fabs(scroll.y) >= std::fabs(scroll.x))) {
+    if (scroll.y != 0 && (scroll.x == 0 || std::fabs(scroll.y) >= std::fabs(scroll.x))) {
         desktopScrollAxis = DesktopScrollAxis::Vertical;
         pendingHorizontalScroll = 0;
         pendingHorizontalScrollEvents = 0;
@@ -138,58 +168,40 @@ void MoonlightInputManager::handleDesktopMouseScroll(brls::Point scroll) {
     sendDesktopMouseScroll({scroll.x, 0});
 }
 
-void MoonlightInputManager::sendDesktopMouseScroll(brls::Point scroll) {
-    desktopScrollRemainder.x += scroll.x * MOONLIGHT_WHEEL_DELTA;
-    desktopScrollRemainder.y += scroll.y * MOONLIGHT_WHEEL_DELTA;
+void StreamInputManager::sendDesktopMouseScroll(brls::Point scroll) {
+    desktopScrollRemainder.x += scroll.x * pf_input::WHEEL_DELTA;
+    desktopScrollRemainder.y += scroll.y * pf_input::WHEEL_DELTA;
 
-    const int horizontal = std::clamp(
-        static_cast<int>(std::trunc(desktopScrollRemainder.x)),
-        static_cast<int>(std::numeric_limits<short>::min()),
-        static_cast<int>(std::numeric_limits<short>::max()));
-    const int vertical = std::clamp(
-        static_cast<int>(std::trunc(desktopScrollRemainder.y)),
-        static_cast<int>(std::numeric_limits<short>::min()),
-        static_cast<int>(std::numeric_limits<short>::max()));
+    const int horizontal = (int)std::trunc(desktopScrollRemainder.x);
+    const int vertical = (int)std::trunc(desktopScrollRemainder.y);
 
     if (horizontal != 0) {
         desktopScrollRemainder.x -= horizontal;
-        const int result =
-            LiSendHighResHScrollEvent(static_cast<short>(horizontal));
-        if (result < 0)
-            brls::Logger::warning(
-                "Failed to queue horizontal mouse scroll: {}", result);
+        pf_input::scroll(horizontal, true);
     }
-
     if (vertical != 0) {
         desktopScrollRemainder.y -= vertical;
-        const int result =
-            LiSendHighResScrollEvent(static_cast<short>(vertical));
-        if (result < 0)
-            brls::Logger::warning(
-                "Failed to queue vertical mouse scroll: {}", result);
+        pf_input::scroll(vertical);
     }
 }
 
-void MoonlightInputManager::sendRelativeMouseMove(brls::Point offset) {
+void StreamInputManager::sendRelativeMouseMove(brls::Point offset) {
     desktopMouseRemainder.x += offset.x;
     desktopMouseRemainder.y += offset.y;
 
-    short deltaX = static_cast<short>(std::trunc(desktopMouseRemainder.x));
-    short deltaY = static_cast<short>(std::trunc(desktopMouseRemainder.y));
-
-    if (deltaX == 0 && deltaY == 0) {
+    int deltaX = (int)std::trunc(desktopMouseRemainder.x);
+    int deltaY = (int)std::trunc(desktopMouseRemainder.y);
+    if (deltaX == 0 && deltaY == 0)
         return;
-    }
 
     desktopMouseRemainder.x -= deltaX;
     desktopMouseRemainder.y -= deltaY;
-
-    LiSendMouseMoveEvent(deltaX, deltaY);
+    pf_input::mouse_move(deltaX, deltaY);
 }
 
-void MoonlightInputManager::reloadButtonMappingLayout() {
-    KeyMappingLayout layout = (*Settings::instance().get_mapping_laouts())
-        [Settings::instance().get_current_mapping_layout()];
+void StreamInputManager::reloadButtonMappingLayout() {
+    KeyMappingLayout layout =
+        (*Settings::instance().get_mapping_laouts())[Settings::instance().get_current_mapping_layout()];
     for (int i = 0; i < _BUTTON_MAX; i++) {
         if (layout.mapping.count(i) == 1) {
             mappingButtons[i] = (brls::ControllerButton)layout.mapping.at(i);
@@ -199,56 +211,11 @@ void MoonlightInputManager::reloadButtonMappingLayout() {
     }
 }
 
-void MoonlightInputManager::updateTouchScreenPanDelta(
-    brls::PanGestureStatus panStatus) {
+void StreamInputManager::updateTouchScreenPanDelta(brls::PanGestureStatus panStatus) {
     this->panStatus = panStatus;
 }
 
-void MoonlightInputManager::handleRumble(unsigned short controller,
-                                         unsigned short lowFreqMotor,
-                                         unsigned short highFreqMotor) {
-    brls::Logger::debug("Rumble {} {}", lowFreqMotor, highFreqMotor);
-
-    if (controller >= GAMEPADS_MAX) {
-        brls::Logger::warning("Ignoring rumble for out-of-range controller {}", controller);
-        return;
-    }
-
-    float rumbleMultiplier = Settings::instance().get_rumble_force();
-
-    rumbleCache[controller].lowFreqMotor = lowFreqMotor * rumbleMultiplier;
-    rumbleCache[controller].highFreqMotor = highFreqMotor * rumbleMultiplier;
-
-    brls::Application::getPlatform()->getInputManager()->sendRumble(
-        controller, 
-        rumbleCache[controller].lowFreqMotor,
-        rumbleCache[controller].highFreqMotor);
-}
-
-void MoonlightInputManager::handleRumbleTriggers(uint16_t controllerNumber, 
-                                                  uint16_t leftTriggerMotor, 
-                                                  uint16_t rightTriggerMotor) {
-    brls::Logger::debug("Rumble Trigger {} {}", leftTriggerMotor, rightTriggerMotor);
-
-    if (controllerNumber >= GAMEPADS_MAX) {
-        brls::Logger::warning("Ignoring trigger rumble for out-of-range controller {}", controllerNumber);
-        return;
-    }
-
-    float rumbleMultiplier = Settings::instance().get_rumble_force();
-
-    rumbleCache[controllerNumber].leftTriggerMotor = leftTriggerMotor * rumbleMultiplier;
-    rumbleCache[controllerNumber].rightTriggerMotor = rightTriggerMotor * rumbleMultiplier;
-
-    brls::Application::getPlatform()->getInputManager()->sendRumble(
-        controllerNumber, 
-        rumbleCache[controllerNumber].lowFreqMotor,
-        rumbleCache[controllerNumber].highFreqMotor,
-        rumbleCache[controllerNumber].leftTriggerMotor,
-        rumbleCache[controllerNumber].rightTriggerMotor);
-}
-
-void MoonlightInputManager::dropInput() {
+void StreamInputManager::dropInput() {
     if (inputDropped)
         return;
 
@@ -259,59 +226,78 @@ void MoonlightInputManager::dropInput() {
     desktopScrollAxis = DesktopScrollAxis::None;
     lastDesktopScrollEvent = {};
 
-    bool res = true;
-    // Drop gamepad state
-    GamepadState gamepadState;
-    auto controllersCount = brls::Application::getPlatform()
-                            ->getInputManager()
-                            ->getControllersConnectedCount();
-
-    if (controllersCount > GAMEPADS_MAX) {
-        brls::Logger::warning("Clamping controller count from {} to {} while dropping input", controllersCount, GAMEPADS_MAX);
-        controllersCount = GAMEPADS_MAX;
+    for (int i = 0; i < announcedPads; i++) {
+        sendGamepadState(i, GamepadState{});
+        lastGamepadStates[i] = GamepadState{};
     }
 
-    for (short i = 0; i < controllersCount; i++) {
-        res &= LiSendMultiControllerEvent(
-                   i, controllersToMap(), gamepadState.buttonFlags,
-                   gamepadState.leftTrigger, gamepadState.rightTrigger,
-                   gamepadState.leftStickX, gamepadState.leftStickY,
-                   gamepadState.rightStickX, gamepadState.rightStickY) == 0;
-    }
+    pf_input::mouse_button(pf_input::MOUSE_LEFT, false);
+    pf_input::mouse_button(pf_input::MOUSE_MIDDLE, false);
+    pf_input::mouse_button(pf_input::MOUSE_RIGHT, false);
+    touchMouseDown = false;
 
-    // Drop touchscreen mouse state
-    LiSendMouseButtonEvent(BUTTON_ACTION_RELEASE,BUTTON_MOUSE_LEFT);
-
-    // Drop touchscreen state
-    for (auto id: activeTouchIDs) {
-        LiSendTouchEvent(LI_TOUCH_EVENT_CANCEL, id.first, 0, 0, 0, 0, 0, LI_ROT_UNKNOWN);
-    }
+    for (auto id : activeTouchIDs)
+        pf_input::touch_up(id.first);
     activeTouchIDs.clear();
 
-    // Drop keyboard state
-    for (int i = BRLS_KBD_KEY_SPACE; i < BrlsKeyboardScancode::BRLS_KBD_KEY_LAST; i++)  {
-        short vkKey = MoonlightInputManager::glfwKeyToVKKey((BrlsKeyboardScancode)i);
-        LiSendKeyboardEvent(vkKey, KEY_ACTION_UP, 0);
-    }
+    for (uint16_t vk : pressedKeys)
+        pf_input::key(vk, false);
+    pressedKeys.clear();
 
-    inputDropped = res;
+    inputDropped = true;
 }
 
-GamepadState MoonlightInputManager::getControllerState(int controllerNum,
-                                                       bool specialKey) {
+uint32_t StreamInputManager::positionalButtons(const brls::ControllerState& controller) {
+    uint32_t buttons = 0;
+    auto set = [&](uint32_t bit, brls::ControllerButton button) {
+        if (controller.buttons[button])
+            buttons |= bit;
+    };
+
+    set(pf_input::BTN_DPAD_UP, brls::BUTTON_UP);
+    set(pf_input::BTN_DPAD_DOWN, brls::BUTTON_DOWN);
+    set(pf_input::BTN_DPAD_LEFT, brls::BUTTON_LEFT);
+    set(pf_input::BTN_DPAD_RIGHT, brls::BUTTON_RIGHT);
+
+    // The wire is positional (BTN_A = south). borealis reports Switch buttons by label,
+    // so Nintendo B (south) becomes BTN_A and so on.
+#ifdef __SWITCH__
+    set(pf_input::BTN_A, brls::BUTTON_B);
+    set(pf_input::BTN_B, brls::BUTTON_A);
+    set(pf_input::BTN_X, brls::BUTTON_Y);
+    set(pf_input::BTN_Y, brls::BUTTON_X);
+#else
+    set(pf_input::BTN_A, brls::BUTTON_A);
+    set(pf_input::BTN_B, brls::BUTTON_B);
+    set(pf_input::BTN_X, brls::BUTTON_X);
+    set(pf_input::BTN_Y, brls::BUTTON_Y);
+#endif
+
+    set(pf_input::BTN_BACK, brls::BUTTON_BACK);
+    set(pf_input::BTN_START, brls::BUTTON_START);
+    set(pf_input::BTN_LB, brls::BUTTON_LB);
+    set(pf_input::BTN_RB, brls::BUTTON_RB);
+    set(pf_input::BTN_LS_CLICK, brls::BUTTON_LSB);
+    set(pf_input::BTN_RS_CLICK, brls::BUTTON_RSB);
+    set(pf_input::BTN_GUIDE, brls::BUTTON_GUIDE);
+    return buttons;
+}
+
+GamepadState StreamInputManager::getControllerState(int controllerNum, bool specialKey) {
     brls::ControllerState rawController{};
     brls::ControllerState controller{};
 
     brls::Application::setSwapHalfJoyconStickToDpad(Settings::instance().swap_joycon_stick_to_dpad());
-    brls::Application::getPlatform()->getInputManager()->updateControllerState(
-        &rawController, controllerNum);
+    brls::Application::getPlatform()->getInputManager()->updateControllerState(&rawController,
+                                                                              controllerNum);
     controller = mapController(rawController);
 
     // Use axis or button if axis is not available (equals 0)
-    float lzAxis = controller.axes[LEFT_Z] > 0 ? controller.axes[LEFT_Z] : (controller.buttons[brls::BUTTON_LT] ? 1.f : 0.f);
-    float rzAxis = controller.axes[RIGHT_Z] > 0 ? controller.axes[RIGHT_Z] : (controller.buttons[brls::BUTTON_RT] ? 1.f : 0.f);
+    float lzAxis = controller.axes[LEFT_Z] > 0 ? controller.axes[LEFT_Z]
+                                                : (controller.buttons[brls::BUTTON_LT] ? 1.f : 0.f);
+    float rzAxis = controller.axes[RIGHT_Z] > 0 ? controller.axes[RIGHT_Z]
+                                                 : (controller.buttons[brls::BUTTON_RT] ? 1.f : 0.f);
 
-    // Truncate dead zones
     float leftStickDeadzone = Settings::instance().get_deadzone_stick_left();
     float rightStickDeadzone = Settings::instance().get_deadzone_stick_right();
 
@@ -320,302 +306,250 @@ GamepadState MoonlightInputManager::getControllerState(int controllerNum,
     float rightXAxis = controller.axes[brls::RIGHT_X];
     float rightYAxis = controller.axes[brls::RIGHT_Y];
 
-    if (leftStickDeadzone > 0) {
-        float magnitude = fsqrt_(leftXAxis * leftXAxis + leftYAxis * leftYAxis);
-        if (magnitude < leftStickDeadzone) {
-            leftXAxis = 0;
-            leftYAxis = 0;
-        }
+    if (leftStickDeadzone > 0 &&
+        std::sqrt(leftXAxis * leftXAxis + leftYAxis * leftYAxis) < leftStickDeadzone) {
+        leftXAxis = 0;
+        leftYAxis = 0;
+    }
+    if (rightStickDeadzone > 0 &&
+        std::sqrt(rightXAxis * rightXAxis + rightYAxis * rightYAxis) < rightStickDeadzone) {
+        rightXAxis = 0;
+        rightYAxis = 0;
     }
 
-    if (rightStickDeadzone > 0) {
-        float magnitude = fsqrt_(rightXAxis * rightXAxis + rightYAxis * rightYAxis);
-        if (magnitude < rightStickDeadzone) {
-            rightXAxis = 0;
-            rightYAxis = 0;
-        }
-    }
-
-    GamepadState gamepadState{
-        .buttonFlags = 0,
-        .leftTrigger = static_cast<unsigned char>(
-            0xFF * (!specialKey ? lzAxis : 0)),
-        .rightTrigger = static_cast<unsigned char>(
-            0xFF * (!specialKey ? rzAxis : 0)),
-        .leftStickX = static_cast<short>(
-            0x7FFF * (!specialKey ? leftXAxis : 0)),
-        .leftStickY = static_cast<short>(
-            -0x7FFF * (!specialKey ? leftYAxis : 0)),
-        .rightStickX = static_cast<short>(
-            0x7FFF * (!specialKey ? rightXAxis : 0)),
-        .rightStickY = static_cast<short>(
-            -0x7FFF * (!specialKey ? rightYAxis : 0)),
+    auto stick = [specialKey](float v) {
+        return specialKey ? (int16_t)0 : (int16_t)std::clamp(v * 32767.f, -32767.f, 32767.f);
+    };
+    auto trigger = [specialKey](float v) {
+        return specialKey ? (uint8_t)0 : (uint8_t)std::clamp(v * 255.f, 0.f, 255.f);
     };
 
-    brls::ControllerButton a = brls::BUTTON_A;
-    brls::ControllerButton b = brls::BUTTON_B;
-    brls::ControllerButton x = brls::BUTTON_X;
-    brls::ControllerButton y = brls::BUTTON_Y;
-
-#define SET_GAME_PAD_STATE(LIMELIGHT_KEY, GAMEPAD_BUTTON)                      \
-    controller.buttons[GAMEPAD_BUTTON]                                         \
-        ? (gamepadState.buttonFlags |= LIMELIGHT_KEY)                          \
-        : (gamepadState.buttonFlags &= ~LIMELIGHT_KEY);
-
-    SET_GAME_PAD_STATE(UP_FLAG, brls::BUTTON_UP);
-    SET_GAME_PAD_STATE(DOWN_FLAG, brls::BUTTON_DOWN);
-    SET_GAME_PAD_STATE(LEFT_FLAG, brls::BUTTON_LEFT);
-    SET_GAME_PAD_STATE(RIGHT_FLAG, brls::BUTTON_RIGHT);
-
-#ifdef __SWITCH__
-    SET_GAME_PAD_STATE(A_FLAG, b);
-    SET_GAME_PAD_STATE(B_FLAG, a);
-    SET_GAME_PAD_STATE(X_FLAG, y);
-    SET_GAME_PAD_STATE(Y_FLAG, x);
-#else
-    SET_GAME_PAD_STATE(A_FLAG, a);
-    SET_GAME_PAD_STATE(B_FLAG, b);
-    SET_GAME_PAD_STATE(X_FLAG, x);
-    SET_GAME_PAD_STATE(Y_FLAG, y);
-#endif
-
-    SET_GAME_PAD_STATE(BACK_FLAG, brls::BUTTON_BACK);
-    SET_GAME_PAD_STATE(PLAY_FLAG, brls::BUTTON_START);
-
-    SET_GAME_PAD_STATE(LB_FLAG, brls::BUTTON_LB);
-    SET_GAME_PAD_STATE(RB_FLAG, brls::BUTTON_RB);
-
-    SET_GAME_PAD_STATE(LS_CLK_FLAG, brls::BUTTON_LSB);
-    SET_GAME_PAD_STATE(RS_CLK_FLAG, brls::BUTTON_RSB);
+    GamepadState state;
+    state.leftTrigger = trigger(lzAxis);
+    state.rightTrigger = trigger(rzAxis);
+    state.leftStickX = stick(leftXAxis);
+    state.leftStickY = stick(-leftYAxis);
+    state.rightStickX = stick(rightXAxis);
+    state.rightStickY = stick(-rightYAxis);
+    state.buttons = positionalButtons(controller);
 
     auto guideKeys = Settings::instance().guide_key_options().buttons;
     bool guideCombo = !guideKeys.empty();
     for (auto key : guideKeys)
         guideCombo &= controller.buttons[key];
 
-    if (guideCombo ||
-        lastGamepadStates[controllerNum].buttonFlags & SPECIAL_FLAG)
-        gamepadState.buttonFlags = 0;
+    if (guideCombo || lastGamepadStates[controllerNum].buttons & pf_input::BTN_GUIDE)
+        state.buttons = 0;
 
-    bool guidePressed = guideCombo || controller.buttons[brls::BUTTON_GUIDE];
-    guidePressed ? (gamepadState.buttonFlags |= SPECIAL_FLAG)
-               : (gamepadState.buttonFlags &= ~SPECIAL_FLAG);
+    if (guideCombo || controller.buttons[brls::BUTTON_GUIDE])
+        state.buttons |= pf_input::BTN_GUIDE;
 
-    return gamepadState;
+    return state;
 }
 
-void MoonlightInputManager::handleControllers(bool specialKey) {
-    static int lastControllerCount = 0;
-
-    auto controllersCount = brls::Application::getPlatform()
-                            ->getInputManager()
-                            ->getControllersConnectedCount();
-
-    if (controllersCount > GAMEPADS_MAX) {
-        brls::Logger::warning("Clamping controller count from {} to {} while handling input", controllersCount, GAMEPADS_MAX);
-        controllersCount = GAMEPADS_MAX;
+void StreamInputManager::sendGamepadState(int pad, const GamepadState& state) {
+    if (PunktfunkSession::host_supports_gamepad_state()) {
+        snapshotSeq[pad] = (uint8_t)(snapshotSeq[pad] + 1);
+        pf_input::gamepad_state((uint8_t)pad, snapshotSeq[pad], state.buttons, state.leftTrigger,
+                                state.rightTrigger, state.leftStickX, state.leftStickY,
+                                state.rightStickX, state.rightStickY);
+        return;
     }
 
-    short mappedControllersCount = controllersToMap();
+    const GamepadState& last = lastGamepadStates[pad];
+    const uint32_t changed = state.buttons ^ last.buttons;
+    for (uint32_t bit = 1; bit && bit <= changed; bit <<= 1)
+        if (changed & bit)
+            pf_input::gamepad_button((uint8_t)pad, bit, state.buttons & bit);
 
-    for (int i = 0; i < controllersCount; i++) {
-        GamepadState gamepadState = getControllerState(i, specialKey);
+    if (state.leftStickX != last.leftStickX)
+        pf_input::gamepad_axis((uint8_t)pad, pf_input::AXIS_LS_X, state.leftStickX);
+    if (state.leftStickY != last.leftStickY)
+        pf_input::gamepad_axis((uint8_t)pad, pf_input::AXIS_LS_Y, state.leftStickY);
+    if (state.rightStickX != last.rightStickX)
+        pf_input::gamepad_axis((uint8_t)pad, pf_input::AXIS_RS_X, state.rightStickX);
+    if (state.rightStickY != last.rightStickY)
+        pf_input::gamepad_axis((uint8_t)pad, pf_input::AXIS_RS_Y, state.rightStickY);
+    if (state.leftTrigger != last.leftTrigger)
+        pf_input::gamepad_axis((uint8_t)pad, pf_input::AXIS_LT, state.leftTrigger);
+    if (state.rightTrigger != last.rightTrigger)
+        pf_input::gamepad_axis((uint8_t)pad, pf_input::AXIS_RT, state.rightTrigger);
+}
 
-        if (!gamepadState.is_equal(lastGamepadStates[i])) {
-            lastGamepadStates[i] = gamepadState;
+void StreamInputManager::ensurePadsAnnounced() {
+    handleControllers(false);
+}
 
-            if (lastControllerCount != controllersCount) {
-                lastControllerCount = controllersCount;
-                
-                for (int i = 0; i < controllersCount; i++) {
-                    Logger::debug("StreamingView: send features message for controller #{}", i);
-                    LiSendControllerArrivalEvent(i, mappedControllersCount, LI_CTYPE_UNKNOWN, 0, LI_CCAP_RUMBLE | LI_CCAP_ACCEL | LI_CCAP_GYRO);
-                }
-            }
+void StreamInputManager::handleControllers(bool specialKey) {
+    const int count = connectedPads();
 
-            if (LiSendMultiControllerEvent(
-                    i, mappedControllersCount, gamepadState.buttonFlags,
-                    gamepadState.leftTrigger, gamepadState.rightTrigger,
-                    gamepadState.leftStickX, gamepadState.leftStickY,
-                    gamepadState.rightStickX, gamepadState.rightStickY) != 0)
-                brls::Logger::info("StreamingView: error sending input data");
+    if (count != announcedPads) {
+        brls::Logger::info("gamepad: pads {} → {} (host type {})", announcedPads, count, padType());
+        for (int i = count; i < announcedPads; i++) {
+            sendGamepadState(i, GamepadState{});
+            lastGamepadStates[i] = GamepadState{};
+            pf_input::gamepad_remove((uint8_t)i);
+        }
+        for (int i = announcedPads; i < count; i++) {
+            pf_input::gamepad_arrival((uint8_t)i, padType());
+            // Host builds the UHID/uinput device on the first present frame, not
+            // on arrival. Send a rest report so a launched game can see a pad.
+            if (PunktfunkSession::host_supports_gamepad_state())
+                sendGamepadState(i, GamepadState{});
+            else
+                pf_input::gamepad_axis((uint8_t)i, pf_input::AXIS_LS_X, 0);
+        }
+        announcedPads = count;
+    }
+
+    const bool snapshots = PunktfunkSession::host_supports_gamepad_state();
+    const auto now = std::chrono::steady_clock::now();
+    const bool refresh =
+        snapshots && (lastSnapshotRefresh.time_since_epoch().count() == 0 ||
+                      now - lastSnapshotRefresh >= std::chrono::milliseconds(100));
+
+    for (int i = 0; i < count; i++) {
+        GamepadState state = getControllerState(i, specialKey);
+        if (!(state == lastGamepadStates[i]) || refresh) {
+            sendGamepadState(i, state);
+            lastGamepadStates[i] = state;
         }
     }
+    if (refresh)
+        lastSnapshotRefresh = now;
 }
 
-void MoonlightInputManager::handleInput(bool ignoreTouch) {
+void StreamInputManager::handleInput(bool ignoreTouch) {
     inputDropped = false;
     static brls::ControllerState rawController;
     static brls::ControllerState controller;
     static brls::RawMouseState mouse;
 
-    brls::Application::getPlatform()
-            ->getInputManager()
-            ->updateUnifiedControllerState(&rawController);
-    brls::Application::getPlatform()->getInputManager()->updateMouseStates(
-            &mouse);
+    auto* platformInput = brls::Application::getPlatform()->getInputManager();
+    platformInput->updateUnifiedControllerState(&rawController);
+    platformInput->updateMouseStates(&mouse);
     controller = mapController(rawController);
 
     std::vector<brls::RawTouchState> states;
-    brls::Application::getPlatform()->getInputManager()->updateTouchStates(&states);
+    platformInput->updateTouchStates(&states);
 
-    //Do not use gamepad for mouse controll assist if touchscreen mode enabled
-    bool specialKey = !ignoreTouch && !Settings::instance().touchscreen_mouse_mode() && states.size() == 1;
+    const TouchMode touchMode = Settings::instance().touch_mode();
+    const bool trackpad = touchMode == TouchMode::Trackpad;
+    const bool touchOff = touchMode == TouchMode::Off;
+
+    // One finger on the screen turns the pad into a mouse assist (trackpad only).
+    bool specialKey = !ignoreTouch && trackpad && states.size() == 1;
 
     handleControllers(specialKey);
 
     float stickScrolling = 0;
     if (specialKey) {
-        stickScrolling =
-                applyStickScrollDeadzone(controller.axes[brls::LEFT_Y],
-                                         Settings::instance().get_deadzone_stick_left()) +
-                applyStickScrollDeadzone(controller.axes[brls::RIGHT_Y],
-                                         Settings::instance().get_deadzone_stick_right());
+        stickScrolling = applyStickScrollDeadzone(controller.axes[brls::LEFT_Y],
+                                                  Settings::instance().get_deadzone_stick_left()) +
+                         applyStickScrollDeadzone(controller.axes[brls::RIGHT_Y],
+                                                  Settings::instance().get_deadzone_stick_right());
     }
 
     static MouseStateS lastMouseState;
 
     MouseStateS mouseState;
-    if (!Settings::instance().touchscreen_mouse_mode()) {
-        mouseState = {
-                .scroll_y = stickScrolling,
-                .l_pressed = (specialKey && controller.buttons[brls::BUTTON_RT]) || mouse.leftButton,
-                .m_pressed = mouse.middleButton,
-                .r_pressed = (specialKey && controller.buttons[brls::BUTTON_LT]) || mouse.rightButton
-        };
+    if (trackpad) {
+        mouseState = {.scroll_y = stickScrolling,
+                      .l_pressed = (specialKey && controller.buttons[brls::BUTTON_RT]) || mouse.leftButton,
+                      .m_pressed = mouse.middleButton,
+                      .r_pressed = (specialKey && controller.buttons[brls::BUTTON_LT]) || mouse.rightButton};
     } else {
-        mouseState = {
-                .scroll_y = 0,
-                .l_pressed = mouse.leftButton,
-                .m_pressed = mouse.middleButton,
-                .r_pressed = mouse.rightButton
-        };
+        mouseState = {.scroll_y = 0,
+                      .l_pressed = mouse.leftButton,
+                      .m_pressed = mouse.middleButton,
+                      .r_pressed = mouse.rightButton};
     }
 
     if (Settings::instance().swap_mouse_scroll())
         mouseState.scroll_y *= -1;
 
+    const bool swap = Settings::instance().swap_mouse_keys();
     if (mouseState.l_pressed != lastMouseState.l_pressed) {
         lastMouseState.l_pressed = mouseState.l_pressed;
-        auto lb = Settings::instance().swap_mouse_keys() ? BUTTON_MOUSE_RIGHT
-                                                         : BUTTON_MOUSE_LEFT;
-        LiSendMouseButtonEvent(mouseState.l_pressed ? BUTTON_ACTION_PRESS
-                                                    : BUTTON_ACTION_RELEASE,
-                               lb);
-        if (!mouseState.l_pressed)
-            Logger::debug("Release key lmb");
+        pf_input::mouse_button(swap ? pf_input::MOUSE_RIGHT : pf_input::MOUSE_LEFT, mouseState.l_pressed);
     }
-
     if (mouseState.m_pressed != lastMouseState.m_pressed) {
         lastMouseState.m_pressed = mouseState.m_pressed;
-        LiSendMouseButtonEvent(mouseState.m_pressed ? BUTTON_ACTION_PRESS
-                                                    : BUTTON_ACTION_RELEASE,
-                               BUTTON_MOUSE_MIDDLE);
+        pf_input::mouse_button(pf_input::MOUSE_MIDDLE, mouseState.m_pressed);
     }
-
     if (mouseState.r_pressed != lastMouseState.r_pressed) {
         lastMouseState.r_pressed = mouseState.r_pressed;
-        auto rb = Settings::instance().swap_mouse_keys() ? BUTTON_MOUSE_LEFT
-                                                         : BUTTON_MOUSE_RIGHT;
-        LiSendMouseButtonEvent(mouseState.r_pressed ? BUTTON_ACTION_PRESS
-                                                    : BUTTON_ACTION_RELEASE,
-                               rb);
+        pf_input::mouse_button(swap ? pf_input::MOUSE_LEFT : pf_input::MOUSE_RIGHT, mouseState.r_pressed);
     }
 
-    std::chrono::high_resolution_clock::time_point timeNow =
-            std::chrono::high_resolution_clock::now();
-    static std::chrono::high_resolution_clock::time_point timeStamp = timeNow;
-
-    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
-            timeNow - timeStamp)
-            .count();
-    if (mouseState.scroll_y != 0 &&
-        (float) duration > 550 - std::fabs(mouseState.scroll_y) * 500) {
+    auto timeNow = std::chrono::steady_clock::now();
+    static auto timeStamp = timeNow;
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(timeNow - timeStamp).count();
+    if (mouseState.scroll_y != 0 && (float)duration > 550 - std::fabs(mouseState.scroll_y) * 500) {
         timeStamp = timeNow;
-        brls::Logger::info("Scroll sended: {}", mouseState.scroll_y);
         lastMouseState.scroll_y = mouseState.scroll_y;
-        LiSendScrollEvent(mouseState.scroll_y > 0 ? 1 : -1);
+        pf_input::scroll(mouseState.scroll_y > 0 ? pf_input::WHEEL_DELTA : -pf_input::WHEEL_DELTA);
     }
 
-    if (!Settings::instance().touchscreen_mouse_mode()) {
-        // Do not process touch events, useful if onscreen keyboard is presented
-        if (ignoreTouch) { return; }
+    if (trackpad) {
+        if (ignoreTouch)
+            return;
 
         if (panStatus.has_value()) {
-            float multiplier =
-                    Settings::instance().get_mouse_speed_multiplier() / 100.f * 1.5f +
-                    0.5f;
-            LiSendMouseMoveEvent(-panStatus->delta.x * multiplier,
-                                 -panStatus->delta.y * multiplier);
+            float multiplier = mouseSpeedMultiplier();
+            pf_input::mouse_move((int)(-panStatus->delta.x * multiplier),
+                                 (int)(-panStatus->delta.y * multiplier));
             panStatus.reset();
         }
-    } else {
-        uint8_t eventType;
+        return;
+    }
 
-        auto touches = brls::Application::currentTouchState;
-        for (int i = 0; i < touches.size(); i++) {
-            auto touch = touches[i];
-            if (touch.view && touch.view->hasParent() && dynamic_cast<StreamingView*>(touch.view->getParent()) == nullptr) return;
+    if (touchOff || ignoreTouch)
+        return;
 
-            switch (touch.phase) {
-                case TouchPhase::START:
-                    eventType = LI_TOUCH_EVENT_DOWN;
-                    break;
-                case TouchPhase::STAY:
-                    eventType = LI_TOUCH_EVENT_MOVE;
-                    break;
-                case TouchPhase::END:
-                    eventType = LI_TOUCH_EVENT_UP;
-                    break;
-                case TouchPhase::NONE:
-                    eventType = LI_TOUCH_EVENT_CANCEL;
-                    break;
+    const int width = (int)Application::contentWidth;
+    const int height = (int)Application::contentHeight;
+    const bool hostTouch =
+        touchMode == TouchMode::Touch && PunktfunkSession::host_supports_touch();
+    auto touches = brls::Application::currentTouchState;
+    for (size_t i = 0; i < touches.size(); i++) {
+        auto touch = touches[i];
+        if (touch.view && touch.view->hasParent() &&
+            dynamic_cast<StreamingView*>(touch.view->getParent()) == nullptr)
+            return;
+
+        const int x = (int)touch.position.x;
+        const int y = (int)touch.position.y;
+        const bool down = touch.phase == TouchPhase::START || touch.phase == TouchPhase::STAY;
+
+        if (hostTouch) {
+            if (touch.phase == TouchPhase::START) {
+                pf_input::touch_down((uint32_t)touch.fingerId, x, y, width, height);
+                activeTouchIDs[touch.fingerId] = true;
+            } else if (touch.phase == TouchPhase::STAY) {
+                pf_input::touch_move((uint32_t)touch.fingerId, x, y, width, height);
+            } else if (activeTouchIDs.erase(touch.fingerId)) {
+                pf_input::touch_up((uint32_t)touch.fingerId);
             }
+            continue;
+        }
 
-            if (touch.phase != TouchPhase::NONE) {
-                activeTouchIDs.insert(std::pair(touch.fingerId, true));
-            } else {
-                activeTouchIDs.erase(touch.fingerId);
-            }
-
-            if (LiSendTouchEvent(eventType, touch.fingerId, touch.position.x / (float) Application::contentWidth,
-                                 touch.position.y / (float) Application::contentHeight, 0, 0, 0, LI_ROT_UNKNOWN) ==
-                LI_ERR_UNSUPPORTED && i == 0) {
-                // Fallback to move cursor and click if touch unsupported
-                if (touch.phase != TouchPhase::NONE) {
-                    LiSendMousePositionEvent(touch.position.x, touch.position.y, Application::contentWidth,
-                                             Application::contentHeight);
-                }
-                if (touch.phase == TouchPhase::START) {
-                    LiSendMouseButtonEvent(BUTTON_ACTION_PRESS, BUTTON_MOUSE_LEFT);
-                }
-                if (touch.phase == TouchPhase::END) {
-                    LiSendMouseButtonEvent(BUTTON_ACTION_RELEASE, BUTTON_MOUSE_LEFT);
-                }
-            }
+        // A host without touch injection gets the first finger as an absolute pointer.
+        if (i != 0)
+            continue;
+        if (down)
+            pf_input::mouse_position(x, y, width, height);
+        if (down && !touchMouseDown) {
+            touchMouseDown = true;
+            pf_input::mouse_button(pf_input::MOUSE_LEFT, true);
+        } else if (!down && touchMouseDown) {
+            touchMouseDown = false;
+            pf_input::mouse_button(pf_input::MOUSE_LEFT, false);
         }
     }
 }
 
-short MoonlightInputManager::controllersToMap() {
-    switch (brls::Application::getPlatform()
-                ->getInputManager()
-                ->getControllersConnectedCount()) {
-    case 0:
-        return 0x0;
-    case 1:
-        return 0x1;
-    case 2:
-        return 0x3;
-    case 3:
-        return 0x7;
-    default:
-        return 0xF;
-    }
-}
-
-brls::ControllerState
-MoonlightInputManager::mapController(brls::ControllerState controller) {
+brls::ControllerState StreamInputManager::mapController(brls::ControllerState controller) {
     brls::ControllerState result{};
 
     std::fill(result.buttons, result.buttons + sizeof(result.buttons), false);
@@ -623,24 +557,17 @@ MoonlightInputManager::mapController(brls::ControllerState controller) {
     for (int i = 0; i < _AXES_MAX; i++)
         result.axes[i] = controller.axes[i];
 
-    for (int i = 0; i < _BUTTON_MAX; i++) {
+    for (int i = 0; i < _BUTTON_MAX; i++)
         result.buttons[mappingButtons[i]] |= controller.buttons[i];
-    }
 
     return result;
 }
 
-void MoonlightInputManager::leftMouseClick() {
-    LiSendMouseButtonEvent(BUTTON_ACTION_PRESS, BUTTON_MOUSE_LEFT);
-    LiSendMouseButtonEvent(BUTTON_ACTION_RELEASE, BUTTON_MOUSE_LEFT);
-}
+void StreamInputManager::leftMouseClick() { pf_input::mouse_click(pf_input::MOUSE_LEFT); }
 
-void MoonlightInputManager::rightMouseClick() {
-    LiSendMouseButtonEvent(BUTTON_ACTION_PRESS, BUTTON_MOUSE_RIGHT);
-    LiSendMouseButtonEvent(BUTTON_ACTION_RELEASE, BUTTON_MOUSE_RIGHT);
-}
+void StreamInputManager::rightMouseClick() { pf_input::mouse_click(pf_input::MOUSE_RIGHT); }
 
-short MoonlightInputManager::glfwKeyToVKKey(BrlsKeyboardScancode key) {
+uint16_t StreamInputManager::keyToVK(BrlsKeyboardScancode key) {
     if (BRLS_KBD_KEY_F1 <= key && key <= BRLS_KBD_KEY_F12)
         return key - BRLS_KBD_KEY_F1 + 0x70;
 
@@ -738,6 +665,6 @@ short MoonlightInputManager::glfwKeyToVKKey(BrlsKeyboardScancode key) {
         return 0x2E;
 
     default:
-        return key;
+        return (uint16_t)key;
     }
 }
