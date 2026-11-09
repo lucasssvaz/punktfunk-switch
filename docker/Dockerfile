@@ -27,7 +27,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libopus-dev \
     && rm -rf /var/lib/apt/lists/*
 
-ARG RUST_NIGHTLY=nightly
+# Pin the nightly: `-Zbuild-std` resolves std's deps inside the sysroot (see the libc patch
+# below), so the toolchain must be the one whose bundled libc matches punktfunk-rs/patches/libc.
+# A floating nightly silently swapped std onto crates.io libc when it bumped its libc pin.
+ARG RUST_NIGHTLY=nightly-2026-10-12
 ENV RUSTUP_HOME=/opt/rustup CARGO_HOME=/opt/cargo PATH=/opt/cargo/bin:$PATH
 RUN curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain ${RUST_NIGHTLY} \
     && rustup component add rust-src \

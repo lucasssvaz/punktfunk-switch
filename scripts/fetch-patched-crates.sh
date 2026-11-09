@@ -8,12 +8,17 @@
 # punktfunk-rs/patches/<name>/ and applies punktfunk-rs/patches/series/<name>-<version>.patch.
 # Also applies local Horizon patches in patches/*.patch to git submodules under extern/, and
 # invalidates punktfunk-rs/target when the libc fork changes (see the end of this file).
+# Pass `--switch` to also verify the Rust sysroot's std locks the same libc version as the fork.
 # Idempotent and cheap; run before every cargo build (CMake and CI do).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 RS="$ROOT/punktfunk-rs"
 CRATES=(aws-lc-sys)
+SWITCH_BUILD=0
+for arg in "$@"; do
+    [ "$arg" = "--switch" ] && SWITCH_BUILD=1
+done
 
 apply_submodule_patch() { # <submodule_rel_path> <patch_file>
     local sub="$ROOT/$1"
@@ -66,6 +71,29 @@ for name in "${CRATES[@]}"; do
     rm -rf "$tmp"
     trap - EXIT
 done
+
+# `-Zbuild-std` resolves std's deps in the sysroot's own `library/` workspace; docker/Dockerfile
+# points that workspace's `[patch.crates-io]` at our libc fork. Cargo only honours the patch when
+# its version matches the version std locked. A mismatch silently compiles crates.io libc for
+# Horizon (wrong socket/stat/pthread layouts), so refuse to build the Switch lib in that state.
+if [ "$SWITCH_BUILD" = 1 ] && command -v rustc >/dev/null 2>&1; then
+    fork_libc="$(awk '$0 == "name = \"libc\"" { hit = 1; next }
+        hit && $1 == "version" { gsub(/"/, "", $3); print $3; exit }' \
+        "$RS/patches/libc/Cargo.toml")"
+    sysroot_lock="$(rustc --print sysroot)/lib/rustlib/src/rust/library/Cargo.lock"
+    sysroot_libc=""
+    if [ -f "$sysroot_lock" ]; then
+        sysroot_libc="$(awk '$0 == "name = \"libc\"" { hit = 1; next }
+            hit && $1 == "version" { gsub(/"/, "", $3); print $3; exit }' "$sysroot_lock")"
+    fi
+    if [ -n "$sysroot_libc" ] && [ "$sysroot_libc" != "$fork_libc" ]; then
+        echo "punktfunk-rs/patches/libc is version $fork_libc but the Rust sysroot's std locks" >&2
+        echo "libc $sysroot_libc, so the build-std [patch] would be ignored and std would use" >&2
+        echo "crates.io libc instead. Pin the toolchain in docker/Dockerfile to a nightly whose" >&2
+        echo "libc matches the fork (or update the fork)." >&2
+        exit 1
+    fi
+fi
 
 # `-Zbuild-std` never re-checks std's dependencies for changes. After an edit to patches/libc,
 # std keeps the libc it was first built with, including the cfgs of a stale libc build script:

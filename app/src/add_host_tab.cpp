@@ -144,7 +144,14 @@ void AddHostTab::connectHost(const Host& host) {
     Dialog* loaderView = createLoadingDialog("add_host/try_connect"_i18n);
     loaderView->open();
 
-    PunktfunkClient::instance().probe(host, [loaderView, host](const PFResult<std::string>& result) {
+    // Probe with the pin we already trust, so a changed certificate is caught by the probe
+    // itself (and reported with the presented fingerprint). An unpaired host uses its mDNS
+    // claim if any, otherwise TOFU.
+    Host target = host;
+    if (auto saved = saved_paired_host(host))
+        target.fingerprint = saved->fingerprint;
+
+    PunktfunkClient::instance().probe(target, [loaderView, host](const PFResult<std::string>& result) {
         loaderView->close([result, host] {
             if (!result.isSuccess()) {
                 showError(result.error());

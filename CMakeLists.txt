@@ -71,8 +71,14 @@ if (USE_LIBROMFS)
 endif ()
 
 set(CMAKE_POLICY_DEFAULT_CMP0077 NEW)
+set(_pf_fetch_args "")
+if (PLATFORM_SWITCH)
+    # Fail loudly if the sysroot's std was built against a different libc version than our fork:
+    # the `[patch]` in the sysroot would be ignored and std would silently use crates.io libc.
+    list(APPEND _pf_fetch_args --switch)
+endif ()
 execute_process(
-    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/scripts/fetch-patched-crates.sh
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/scripts/fetch-patched-crates.sh ${_pf_fetch_args}
     RESULT_VARIABLE _pf_fetch_result)
 if (NOT _pf_fetch_result EQUAL 0)
     message(FATAL_ERROR "scripts/fetch-patched-crates.sh failed (${_pf_fetch_result})")
@@ -102,6 +108,7 @@ if (PLATFORM_SWITCH)
             ${BOREALIS_LIBRARY}/lib/platforms/switch/switch_wrapper.c
             app/src/switch/wrapper.c
             app/src/switch/thread_affinity.c
+            app/src/switch/tls_keys.c
             # libc gaps the Rust std port expects (getrandom, sysconf, getifaddrs, ...)
             punktfunk-rs/shims/horizon_shims.c
             )
@@ -138,7 +145,7 @@ if (PF_RUST_LIB STREQUAL "")
     endif ()
     set(_pf_rust_lib ${PF_RS_DIR}/target/${_pf_rust_triple}/release/libpf_switch.a)
     add_custom_target(pf_switch_rs
-        COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/scripts/fetch-patched-crates.sh
+        COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/scripts/fetch-patched-crates.sh ${_pf_fetch_args}
         COMMAND ${PF_CARGO} build --release -p pf-switch ${_pf_cargo_target_args}
         WORKING_DIRECTORY ${PF_RS_DIR}
         BYPRODUCTS ${_pf_rust_lib}
@@ -364,7 +371,11 @@ if (PLATFORM_SWITCH)
     target_link_options(${PROJECT_NAME} PRIVATE
         -Wl,--wrap=pthread_create
         -Wl,--wrap=pthread_join
-        -Wl,--wrap=pthread_detach)
+        -Wl,--wrap=pthread_detach
+        -Wl,--wrap=__syscall_tls_create
+        -Wl,--wrap=__syscall_tls_set
+        -Wl,--wrap=__syscall_tls_get
+        -Wl,--wrap=__syscall_tls_delete)
 endif ()
 
 if (USE_GL_RENDERER)

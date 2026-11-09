@@ -5,8 +5,8 @@
 target = "targets/aarch64-nintendo-switch-libnx.json"
 
 [unstable]
-build-std = ["std", "panic_abort"]
-build-std-features = ["compiler-builtins-mem"]
+build-std = ["std"]
+build-std-features = ["compiler-builtins-mem", "panic-unwind"]
 json-target-spec = true
 
 [target.aarch64-nintendo-switch-libnx]

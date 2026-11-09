@@ -19,7 +19,7 @@
   },
   "no-default-libraries": false,
   "os": "horizon",
-  "panic-strategy": "abort",
+  "panic-strategy": "unwind",
   "position-independent-executables": true,
   "pre-link-args": {
     "gnu-cc": [

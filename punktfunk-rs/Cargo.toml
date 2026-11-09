@@ -10,10 +10,10 @@ opt-level = 3
 debug = 1
 lto = "thin"
 codegen-units = 4
-panic = "abort"
+panic = "unwind"
 
 [profile.dev]
-panic = "abort"
+panic = "unwind"
 
 [patch.crates-io]
 # libc's horizon bindings describe the 3DS (libctru); the Switch's newlib + libnx BSD sockets

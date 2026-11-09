@@ -532,10 +532,15 @@ std::string PunktfunkClient::pair_error_message(int32_t status) {
 
 void PunktfunkClient::probe(const Host& host, PFCallback<std::string>& callback) {
     pf_spawn([host, callback] {
+        Pin pin{};
+        bool pinned = parse_fingerprint(host.fingerprint, pin);
         uint8_t observed[32] = {};
-        PunktfunkStatus st = punktfunk_probe(host.address.c_str(), (uint16_t)host.port,
-                                             PROBE_TIMEOUT_MS, observed);
-        auto result = st == PUNKTFUNK_STATUS_OK
+        PunktfunkStatus st = punktfunk_probe_ex(host.address.c_str(), (uint16_t)host.port,
+                                                pinned ? pin.data() : nullptr, PROBE_TIMEOUT_MS,
+                                                observed);
+        // A pin mismatch still reports the presented certificate so the caller can compare it
+        // with the saved one and offer "Pair again" instead of just failing.
+        auto result = (st == PUNKTFUNK_STATUS_OK || st == PUNKTFUNK_STATUS_CRYPTO)
                           ? PFResult<std::string>::success(fingerprint_hex(observed))
                           : PFResult<std::string>::failure(status_message(st));
         brls::sync([callback, result] { callback(result); });

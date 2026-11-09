@@ -27,6 +27,7 @@ int __real_pthread_create(pthread_t* thread, const pthread_attr_t* attr,
                           void* (*start_routine)(void*), void* arg);
 int __real_pthread_join(pthread_t thread, void** retval);
 int __real_pthread_detach(pthread_t thread);
+extern void pf_tls_run_destructors(void);
 
 typedef struct PfThreadNode {
     void* (*start_routine)(void*);
@@ -102,6 +103,7 @@ static void* pf_thread_trampoline(void* payload) {
     pthread_cleanup_push(pf_thread_cleanup, node);
     ret = start_routine(arg);
     pthread_cleanup_pop(1);
+    pf_tls_run_destructors();
     return ret;
 }
 

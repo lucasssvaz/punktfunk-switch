@@ -1,8 +1,23 @@
 diff --git a/crates/punktfunk-core/src/client/mod.rs b/crates/punktfunk-core/src/client/mod.rs
-index abd0d054e..fb13108cd 100644
+index abd0d054e..057ae4442 100644
 --- a/crates/punktfunk-core/src/client/mod.rs
 +++ b/crates/punktfunk-core/src/client/mod.rs
-@@ -722,16 +722,24 @@ impl NativeClient {
+@@ -677,6 +677,14 @@ impl ConnectParams {
+     }
+ }
+ 
++/// What a pinned probe saw: the host certificate's SHA-256 and whether it matched the caller's
++/// pin. Returned even on a pin mismatch so the caller can show the presented certificate.
++#[derive(Clone, Copy, Debug, PartialEq, Eq)]
++pub struct ProbeCertificate {
++    pub fingerprint: [u8; 32],
++    pub matched: bool,
++}
++
+ impl NativeClient {
+     /// Dial a `punktfunk/1` host and block until the handshake lands, `timeout` passes or
+     /// `cancel` is set. A host that turns the dial away is [`PunktfunkError::Rejected`].
+@@ -722,16 +730,24 @@ impl NativeClient {
              advertised_client_caps(params.client_caps, params.audio_rate_hz, params.audio_bits);
          let shared_w = shared.clone();
          let ctrl_tx_pump = ctrl_tx.clone(); // pump sends adaptive-FEC LossReports
@@ -33,7 +48,19 @@ index abd0d054e..fb13108cd 100644
                  {
                      Ok(rt) => rt,
                      Err(e) => {
-@@ -774,6 +782,7 @@ impl NativeClient {
+@@ -766,27 +782,35 @@ impl NativeClient {
+             .map_err(PunktfunkError::Io)?;
+ 
+         // Poll so `cancel` can abort; a parked request-access handshake has nothing to wake on.
++        // `try_recv` + sleep, not `recv_timeout`: the latter parks this plain pthread, whose
++        // lazily-created std `Thread` parker has proved corruptible on Horizon (a failing
++        // pthread mutex aborts the process). A 50 ms poll needs no parker at all.
+         const READY_POLL: Duration = Duration::from_millis(50);
+         let deadline = std::time::Instant::now() + timeout;
+         let negotiated = loop {
+-            match ready_rx.recv_timeout(READY_POLL) {
++            match ready_rx.try_recv() {
+                 Ok(Ok(t)) => break t,
                  Ok(Err(e)) => {
                      // Stops what the handshake already started, such as the data punch.
                      shared.shutdown.store(true, Ordering::SeqCst);
@@ -41,7 +68,18 @@ index abd0d054e..fb13108cd 100644
                      return Err(e);
                  }
                  // Keep waiting unless budget spent or cancelled. Disconnected = worker died
-@@ -787,6 +796,7 @@ impl NativeClient {
+                 // without reporting; the give-up arm below covers it. Cancel and expiry share
+                 // that arm: both owe the host the same close.
+-                Err(std::sync::mpsc::RecvTimeoutError::Timeout)
++                Err(std::sync::mpsc::TryRecvError::Empty)
+                     if std::time::Instant::now() < deadline
+-                        && !cancel.as_ref().is_some_and(|c| c.load(Ordering::SeqCst)) => {}
++                        && !cancel.as_ref().is_some_and(|c| c.load(Ordering::SeqCst)) =>
++                {
++                    std::thread::sleep(READY_POLL);
++                }
+                 Err(_) => {
+                     // Failed connect must not linger if handshake lands late: QUIT, not close
                      // code 0, so the host tears down instead of holding a virtual display.
                      shared.quit.store(true, Ordering::SeqCst);
                      shared.shutdown.store(true, Ordering::SeqCst);
@@ -49,6 +87,123 @@ index abd0d054e..fb13108cd 100644
                      return Err(PunktfunkError::Timeout);
                  }
              }
+@@ -867,6 +891,40 @@ impl NativeClient {
+     /// Wake-on-LAN for exactly the machine that needs it. Two OS installs of a dual-boot box
+     /// share one lease the same way.
+     pub fn probe_identity(host: &str, port: u16, timeout: Duration) -> Option<[u8; 32]> {
++        Self::probe_identity_ex(host, port, None, timeout).map(|outcome| outcome.fingerprint)
++    }
++
++    /// Reachability **and** certificate check in one handshake: offers `punktfunk/2` (and
++    /// `punktfunk/1` for older hosts), records the leaf the host presents, and reports whether
++    /// it matches `pin`. A mismatch still returns the observed fingerprint so the caller can
++    /// show it; the connection itself never completes.
++    ///
++    /// A current-thread runtime parks its calling thread. On Horizon a plain pthread's
++    /// lazily-created std `Thread` parker can hold a corrupt mutex, aborting the process;
++    /// a std-spawned worker has its parker set up by std, so run the runtime there.
++    pub fn probe_identity_ex(
++        host: &str,
++        port: u16,
++        pin: Option<[u8; 32]>,
++        timeout: Duration,
++    ) -> Option<ProbeCertificate> {
++        let host = host.to_string();
++        std::thread::Builder::new()
++            .name("punktfunk-probe".into())
++            .spawn(move || Self::probe_identity_ex_on_runtime(&host, port, pin, timeout))
++            .ok()?
++            .join()
++            .ok()
++            .flatten()
++    }
++
++    /// The runtime half of [`Self::probe_identity_ex`]; runs on a std-created thread.
++    fn probe_identity_ex_on_runtime(
++        host: &str,
++        port: u16,
++        pin: Option<[u8; 32]>,
++        timeout: Duration,
++    ) -> Option<ProbeCertificate> {
+         let rt = tokio::runtime::Builder::new_current_thread()
+             .enable_all()
+             .build()
+@@ -874,21 +932,26 @@ impl NativeClient {
+         let host = host.to_string();
+         rt.block_on(async move {
+             let remote = dial_addr(&host, port).await.ok()?;
+-            // pin = None accepts any cert and records it. Failures are DNS / no route /
+-            // connect timeout.
+-            let (ep, observed) = endpoint::client_pinned_with_identity(None, None);
+-            let ep = ep.ok()?;
+-            let reachable = match ep.connect(remote, "punktfunk") {
+-                Ok(connecting) => {
+-                    matches!(tokio::time::timeout(timeout, connecting).await, Ok(Ok(_)))
+-                }
+-                Err(_) => false,
+-            };
++            // Offer /2 first so a host that refuses /1 still answers; /1 remains for older hosts.
++            let (ep, observed) = endpoint::client_shared(
++                pin,
++                None,
++                &[crate::quic::v2::registry::ALPN, endpoint::QUIC_ALPN],
++            );
++            let (ep, media) = ep.ok()?;
++            if let Ok(connecting) = ep.connect(remote, "punktfunk") {
++                let _ = tokio::time::timeout(timeout, connecting).await;
++            }
+             ep.close(0u32.into(), b"probe");
+             let _ = tokio::time::timeout(Duration::from_millis(200), ep.wait_idle()).await;
+-            // The slot is written by the cert verifier, so it is only meaningful once the
+-            // handshake completed: a refused or timed-out connect leaves whatever it had.
+-            reachable.then(|| *observed.lock().unwrap()).flatten()
++            drop(media);
++            // The verifier records the leaf even when the pin rejects the handshake.
++            let fingerprint = observed.lock().ok()?.take()?;
++            let matched = pin.is_none() || pin == Some(fingerprint);
++            Some(ProbeCertificate {
++                fingerprint,
++                matched,
++            })
+         })
+     }
+ 
+diff --git a/crates/punktfunk-core/src/client/pairing.rs b/crates/punktfunk-core/src/client/pairing.rs
+index 6dc94d13b..4460d670d 100644
+--- a/crates/punktfunk-core/src/client/pairing.rs
++++ b/crates/punktfunk-core/src/client/pairing.rs
+@@ -17,6 +17,31 @@ impl NativeClient {
+         pin: &str,
+         name: &str,
+         timeout: Duration,
++    ) -> Result<[u8; 32]> {
++        // See `probe_identity`: never park a caller-owned pthread on Horizon.
++        let host = host.to_string();
++        let cert = identity.0.to_string();
++        let key = identity.1.to_string();
++        let pin = pin.to_string();
++        let name = name.to_string();
++        std::thread::Builder::new()
++            .name("punktfunk-pair".into())
++            .spawn(move || {
++                Self::pair_on_runtime(&host, port, (&cert, &key), &pin, &name, timeout)
++            })
++            .map_err(PunktfunkError::Io)?
++            .join()
++            .map_err(|_| PunktfunkError::Io(std::io::Error::other("pair worker panicked")))?
++    }
++
++    /// The runtime half of [`Self::pair`]; runs on a std-created thread.
++    fn pair_on_runtime(
++        host: &str,
++        port: u16,
++        identity: (&str, &str),
++        pin: &str,
++        name: &str,
++        timeout: Duration,
+     ) -> Result<[u8; 32]> {
+         use crate::quic::{pake, PairChallenge, PairProof, PairRequest, PairResult};
+ 
 diff --git a/crates/punktfunk-core/src/quic/endpoint.rs b/crates/punktfunk-core/src/quic/endpoint.rs
 index 7c149a7d3..477cbd26c 100644
 --- a/crates/punktfunk-core/src/quic/endpoint.rs
@@ -256,6 +411,61 @@ index d690fb7b4..7256c921a 100644
          const N: usize = 3000;
          let packets: Vec<Vec<u8>> = (0..N)
              .map(|i| {
+diff --git a/crates/punktfunk-ffi/src/connection/connect.rs b/crates/punktfunk-ffi/src/connection/connect.rs
+index 595bf691a..3067402f9 100644
+--- a/crates/punktfunk-ffi/src/connection/connect.rs
++++ b/crates/punktfunk-ffi/src/connection/connect.rs
+@@ -1173,6 +1173,50 @@ pub unsafe extern "C" fn punktfunk_probe(
+     })
+ }
+ 
++/// Probe with the caller's saved pin: offers `punktfunk/2` first (and `punktfunk/1` for older
++/// hosts), records the host leaf, and reports whether it matches `pin_sha256`. On a mismatch
++/// `observed_sha256_out` still receives the presented fingerprint, so the caller can show it.
++///
++/// # Safety
++/// `host` is a NUL-terminated UTF-8 string; `pin_sha256` is null or readable for 32 bytes;
++/// `observed_sha256_out` is null or writable for 32 bytes.
++#[cfg(feature = "quic")]
++#[unsafe(no_mangle)]
++pub unsafe extern "C" fn punktfunk_probe_ex(
++    host: *const std::os::raw::c_char,
++    port: u16,
++    pin_sha256: *const u8,
++    timeout_ms: u32,
++    observed_sha256_out: *mut u8,
++) -> PunktfunkStatus {
++    guard(|| {
++        // SAFETY: pointers are caller-supplied and null-checked on this path.
++        let Ok(Some(host)) = (unsafe { opt_cstr(host) }) else {
++            return PunktfunkStatus::NullPointer;
++        };
++        // SAFETY: non-null means readable for one `[u8; 32]` per the contract; alignment 1.
++        let pin = (!pin_sha256.is_null())
++            .then(|| unsafe { std::ptr::read_unaligned(pin_sha256.cast::<[u8; 32]>()) });
++        match punktfunk_core::client::NativeClient::probe_identity_ex(
++            host,
++            port,
++            pin,
++            std::time::Duration::from_millis(timeout_ms as u64),
++        ) {
++            Some(outcome) => {
++                // SAFETY: null or writable for 32 bytes (caller contract).
++                unsafe { put_sha256(observed_sha256_out, outcome.fingerprint) };
++                if outcome.matched {
++                    PunktfunkStatus::Ok
++                } else {
++                    PunktfunkStatus::Crypto
++                }
++            }
++            None => PunktfunkStatus::Timeout,
++        }
++    })
++}
++
+ /// PIN pairing: the host displays a PIN; pass it here. On success the host has
+ /// stored this client's identity and the verified host fingerprint is written to
+ /// `host_sha256_out` (32 bytes) — persist it as `pin_sha256` for
 diff --git a/crates/punktfunk-ffi/src/demo_host.rs b/crates/punktfunk-ffi/src/demo_host.rs
 index 11e71636f..e2b60f66e 100644
 --- a/crates/punktfunk-ffi/src/demo_host.rs
@@ -473,3 +683,29 @@ index 581ed25eb..57bd20d30 100644
      tracing::info!(
          port = opts.port,
          source = ?opts.source,
+diff --git a/include/punktfunk_core.h b/include/punktfunk_core.h
+index e7b4e482f..adcbc7d10 100644
+--- a/include/punktfunk_core.h
++++ b/include/punktfunk_core.h
+@@ -2691,6 +2691,21 @@ PunktfunkStatus punktfunk_probe(const char *host,
+                                 uint16_t port,
+                                 uint32_t timeout_ms,
+                                 uint8_t *observed_sha256_out);
++
++// Pinned version of [`punktfunk_probe`]: offers punktfunk/2 first (and punktfunk/1 for older
++// hosts), verifies the host leaf against `pin_sha256` (null = trust on first use), and returns
++// [`PUNKTFUNK_STATUS_CRYPTO`] on a mismatch while still writing the presented fingerprint to
++// `observed_sha256_out`. `PUNKTFUNK_STATUS_TIMEOUT` when nothing answered. Blocks up to
++// `timeout_ms`; run it off the UI thread.
++//
++// # Safety
++// `host` is a NUL-terminated UTF-8 string; `pin_sha256` is null or readable for 32 bytes;
++// `observed_sha256_out` is null, or writable for 32 bytes.
++PunktfunkStatus punktfunk_probe_ex(const char *host,
++                                   uint16_t port,
++                                   const uint8_t *pin_sha256,
++                                   uint32_t timeout_ms,
++                                   uint8_t *observed_sha256_out);
+ #endif
+ 
+ #if defined(PUNKTFUNK_FEATURE_QUIC)
